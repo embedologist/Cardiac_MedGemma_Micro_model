@@ -35,7 +35,7 @@ from pipeline import (
 )
 
 STUDENT_ID = "Qwen/Qwen2.5-0.5B-Instruct"
-OUTPUT_PATH = "medgemma_micro_qwen_0.5b.safetensors"
+OUTPUT_PATH = "medgemma_micro_cardio_edge.safetensors"
 BUDGET_LIMIT_MB = 512.0
 
 
@@ -141,8 +141,9 @@ def run_training_and_quantization(
     student_id: str = STUDENT_ID,
     output_path: str = OUTPUT_PATH,
     hf_token: Optional[str] = None,
-    epochs: int = 2,
-    batch_size: int = 2,
+    epochs: int = 1,
+    batch_size: int = 8,
+    max_length: int = 160,
     device: str = "cpu",
 ):
     print("=" * 70)
@@ -167,12 +168,27 @@ def run_training_and_quantization(
     print(f"  -> Model Hidden Size: {llm_dim}")
     print(f"  -> Total Student Parameters: {sum(p.numel() for p in student_lm.parameters()):,}")
 
+    # Train top semantic layers (18-23) for clinical reasoning adaptation.
+    # Keep layers 0-17, embed_tokens, and lm_head frozen to preserve vocabulary fluency and accelerate step time.
+    for name, param in student_lm.named_parameters():
+        if any(f"layers.{i}." in name for i in range(18, 24)):
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
+
+    trainable_params = sum(p.numel() for p in student_lm.parameters() if p.requires_grad)
+    print(f"  -> Trainable Adaptation Parameters: {trainable_params:,} (Top semantic transformer layers 18-23)", flush=True)
+
     # 2. Distill Cardiology Knowledge from Teacher
-    print(f"[Step 2/5] Running SFT / Distillation across {len(CARDIOLOGY_CURRICULUM)} high-yield cases...")
-    dataset = ClinicalTextDataset(CARDIOLOGY_CURRICULUM, tokenizer, max_length=256)
+    print(f"[Step 2/5] Running SFT / Distillation across {len(CARDIOLOGY_CURRICULUM)} high-yield cases...", flush=True)
+    dataset = ClinicalTextDataset(CARDIOLOGY_CURRICULUM, tokenizer, max_length=max_length)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    optimizer_lm = torch.optim.AdamW(student_lm.parameters(), lr=3e-5, weight_decay=0.01)
+    optimizer_lm = torch.optim.AdamW(
+        [p for p in student_lm.parameters() if p.requires_grad],
+        lr=3e-5,
+        weight_decay=0.01,
+    )
     criterion_lm = nn.CrossEntropyLoss(ignore_index=-100)
 
     student_lm.train()
@@ -187,12 +203,15 @@ def run_training_and_quantization(
             outputs = student_lm(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
             loss = outputs.loss
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(student_lm.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_([p for p in student_lm.parameters() if p.requires_grad], 1.0)
             optimizer_lm.step()
 
             epoch_loss += loss.item()
+            if (step + 1) % 10 == 0 or (step + 1) == len(loader):
+                print(f"     Batch [{step+1}/{len(loader)}] - Step Loss: {loss.item():.4f}", flush=True)
+
         avg_loss = epoch_loss / max(1, len(loader))
-        print(f"  -> [Epoch {epoch+1}/{epochs}] Distillation Cross-Entropy Loss: {avg_loss:.4f}")
+        print(f"  -> [Epoch {epoch+1}/{epochs}] Distillation Cross-Entropy Loss: {avg_loss:.4f}", flush=True)
 
     # 3. Assemble Unified Model with Conformer & Cross-Attention Projector
     print("[Step 3/5] Instantiating 1D-Conformer Sensor Encoder & Cross-Attention Projector...")
@@ -239,10 +258,10 @@ def run_training_and_quantization(
             total += labels.size(0)
 
         acc = (correct / total) * 100.0 if total > 0 else 0.0
-        print(f"  -> [Conformer Epoch {epoch+1}/{epochs}] Arrhythmia Loss: {cls_loss/len(ppg_loader):.4f} | Accuracy: {acc:.1f}%")
+        print(f"  -> [Conformer Epoch {epoch+1}/{epochs}] Arrhythmia Loss: {cls_loss/len(ppg_loader):.4f} | Accuracy: {acc:.1f}%", flush=True)
 
     # 5. Quantize to 4-bit & Export Safetensors
-    print("[Step 5/5] Quantizing linear weights to 4-bit block-wise and serializing...")
+    print("[Step 5/5] Quantizing linear weights to 4-bit block-wise and serializing...", flush=True)
     model.eval()
     raw_dict = model.state_dict()
     compact_dict, size_mb = quantize_state_dict_int4(raw_dict, group_size=64)
@@ -275,8 +294,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MedGemma-Micro Qwen2.5-0.5B Distillation & 4-bit Quantization")
     parser.add_argument("--output", type=str, default=OUTPUT_PATH, help="Output safetensors path")
     parser.add_argument("--student_id", type=str, default=STUDENT_ID, help="Base student model")
-    parser.add_argument("--epochs", type=int, default=2, help="Training epochs")
-    parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=1, help="Training epochs")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument("--max_length", type=int, default=160, help="Max sequence length")
     parser.add_argument("--hf_token", type=str, default=None, help="HF access token")
     args = parser.parse_args()
 
@@ -287,5 +307,6 @@ if __name__ == "__main__":
         hf_token=args.hf_token,
         epochs=args.epochs,
         batch_size=args.batch_size,
+        max_length=args.max_length,
         device=device,
     )

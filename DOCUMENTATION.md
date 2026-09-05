@@ -18,7 +18,7 @@
 6. [Teacher-Student Knowledge Distillation Pipeline](#6-teacher-student-knowledge-distillation-pipeline)
    - [A. Cross-Tokenizer Sequence-Level Distillation](#a-cross-tokenizer-sequence-level-distillation)
    - [B. Clinical & Lifestyle Management Domain Pillars](#b-clinical--lifestyle-management-domain-pillars)
-   - [C. Mandatory Medical Disclaimer & Responsibility Waiver Policy](#c-mandatory-medical-disclaimer--responsibility-waiver-policy)
+   - [C. Mandatory Medical Disclaimer Policy](#c-mandatory-medical-disclaimer-policy)
    - [D. Distillation Loss Formulation](#d-distillation-loss-formulation)
 7. [Mobile Deployment Pipelines: Core ML & LiteRT](#7-mobile-deployment-pipelines-core-ml--litert)
    - [A. Apple iOS Core ML (Apple Neural Engine & Metal)](#a-apple-ios-core-ml-apple-neural-engine--metal)
@@ -41,9 +41,9 @@ MedGemma-Micro solves this challenge on-device by uniting:
 1. An on-device **1D-Conformer Biosignal Encoder** combining multiscale depthwise-separable 1D convolutions with Multi-Head Self-Attention (MHSA) and Multi-Head Attention Pooling, accurately categorizing 5 cardiac conditions in $< 5\text{ ms}$.
 2. A **Temporal Cross-Attention Projection Bridge** mapping downsampled cardiovascular temporal features into continuous prompt prefix tokens ($K = 4, d_{\text{model}} = 896$).
 3. A **MedGemma Distilled Student Language Model** (`Qwen2.5-0.5B-Instruct` in 4-bit block-wise quantization) trained on clinical rationales synthesized from **`google/medgemma-1.5-4b-it`**, providing expert-level triage, clinical reasoning, and cardiovascular lifestyle interventions.
-4. An **On-Device Clinical RAG Grounding Engine** holding compressed ACC/AHA and ESC cardiology guidelines ($< 25\text{ MB}$), ensuring zero-hallucination factual grounding for drug dosages, stroke risk stratification, and emergency red flags.
-5. A **Strict Mobile Weight Ceiling**: The complete unified model serialized in `.safetensors` occupies **~278–345 MB**, well below the **512 MB** ceiling, leaving $> 130\text{ MB}$ of headroom.
-6. A **Programmatic Medical Disclaimer & Responsibility Waiver Guard** ensuring every pharmaceutical response includes a legally sound disclaimer.
+4. An **On-Device Clinical RAG Grounding Engine** holding compressed ACC/AHA and ESC cardiology guidelines plus 1,500 Q&A pairs from `cardiac_health_dataset.md` (< 25 MB), ensuring zero-hallucination factual grounding for drug dosages, stroke risk stratification, lifestyle interventions, and emergency red flags.
+5. A **Strict Mobile Weight Ceiling**: The complete unified model serialized in `.safetensors` occupies **~336–345 MB**, well below the **512 MB** ceiling, leaving $> 165\text{ MB}$ of headroom.
+6. A **Programmatic Medical Disclaimer Guard** ensuring every pharmaceutical response includes the exact standardized medical disclaimer.
 
 ```mermaid
 graph LR
@@ -68,7 +68,7 @@ graph LR
     subgraph LLM["Mobile LLM Engine (~50-70 tok/s)"]
         STUDENT["MedGemma Distilled Student<br/>Qwen2.5-0.5B (4-bit INT4)"]
         GUARD["Programmatic Disclaimer Guard"]
-        OUTPUT["Clinical Triage & Lifestyle Prescriptions<br/>Grounded in Evidence + Waiver"]
+        OUTPUT["Clinical Triage & Lifestyle Prescriptions<br/>Grounded in Evidence + Disclaimer"]
     end
 
     PPG --> STEM --> CONF --> POOL
@@ -139,7 +139,7 @@ sequenceDiagram
         Projector->>LM: Inject prefix embeddings + RAG Guideline Evidence + User Query
         LM->>LM: Autoregressive decoding (~50-70 tokens/sec on Metal/NPU)
         LM->>Guard: Intercept generated tokens for medication safety
-        Guard->>Guard: Validate or auto-append Medical Disclaimer & Responsibility Waiver
+        Guard->>Guard: Validate or auto-append exact Medical Disclaimer
         Guard->>UI: Render structured clinical guidance card:<br/>1. Rhythm Classification & Confidence<br/>2. Verified ACC/AHA Guideline Grounding<br/>3. Actionable Lifestyle Recommendations<br/>4. Pharmacotherapy Guidance with Legal Disclaimer
     end
 ```
@@ -350,12 +350,11 @@ Covers the 5 core cardiology pillars:
 4. **Sleep & Circadian Dipping**: Nocturnal BP/HR dipping ($10\%\text{--}20\%$), STOP-BANG OSA screening, CPAP compliance.
 5. **Stress & Autonomic Modulation**: Diaphragmatic breathing at $6\text{ breaths/min}$, vagal efferent activation.
 
-### C. Mandatory Medical Disclaimer & Responsibility Waiver Policy
+### C. Mandatory Medical Disclaimer Policy
 Enforces a two-tier defense-in-depth safety policy:
-- **Tier 1 (Curriculum Distillation)**: All synthetic drug training examples feature standardized medical disclaimers.
-- **Tier 2 (Deterministic Regex Hook)**: If any prescription cardiovascular drug is detected in the model output without an explicit disclaimer, the system automatically appends the standardized legal warning:
-  > ⚠️ **Medical Disclaimer & Responsibility Waiver**:
-  > The medication information above is provided strictly for educational and informational purposes and does NOT constitute medical advice, diagnosis, or a prescription. Dosages, contraindications, and drug interactions must be evaluated by a licensed cardiologist or physician before initiation, adjustment, or discontinuation. Never alter prescribed therapies without direct clinician supervision.
+- **Tier 1 (Curriculum Distillation)**: All synthetic drug training examples and Q&A items feature standardized medical disclaimers.
+- **Tier 2 (Deterministic Safeguard)**: When medical or pharmaceutical guidance is provided, the system automatically verifies and includes the exact standardized medical disclaimer:
+  > ⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor’s approval.** 
 
 ---
 
@@ -462,7 +461,7 @@ Executes multimodal dialogue generation grounded in Clinical RAG:
 - **Response**:
 ```json
 {
-  "reply": "For Atrial Fibrillation rate control, first-line agents include cardioselective beta-blockers...\n\n> ⚠️ Medical Disclaimer & Responsibility Waiver: ...",
+  "reply": "For Atrial Fibrillation rate control, first-line agents include cardioselective beta-blockers...\n\n---\n⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor’s approval.** ",
   "condition_conditioned": "Atrial Fibrillation (AFib)",
   "rag_grounded": true,
   "guideline_citation": "Stroke Prevention & DOAC Anticoagulation (CHA2DS2-VASc)",
@@ -483,10 +482,11 @@ MedGemma_Micro_model/
 ├── export_litert.py                # Android LiteRT & GGUF export pipeline
 ├── train_and_distill_qwen.py       # MedGemma-to-Qwen distillation & 4-bit quantizer (<512MB)
 ├── pipeline.py                     # 1D-Conformer, Cross-Attention Projector, Simulator, Model
-├── cardiology_curriculum.py        # Multi-pillar clinical & lifestyle dataset
+├── cardiac_health_dataset.md       # 1,500 curated Q&A pairs covering 10 cardiac pillars
+├── cardiology_curriculum.py        # Multi-pillar clinical, lifestyle, & conversational greeting dataset
 ├── test_pipeline.py                # 7-step unit test suite (Architecture, Conformer, RAG, Budget)
-├── test_interface.py               # 8-step test suite for all REST API endpoints & legal disclaimers
-├── app.py                          # FastAPI backend, RAG integration, & waiver safety filter
+├── test_interface.py               # 10-step test suite for API endpoints, greetings & exact disclaimers
+├── app.py                          # FastAPI backend, RAG integration, & disclaimer safety guard
 ├── run_interface.py                # One-click interactive server launcher
 ├── DOCUMENTATION.md                # Comprehensive system architecture & whitepaper
 ├── README.md                       # Project landing page & quickstart

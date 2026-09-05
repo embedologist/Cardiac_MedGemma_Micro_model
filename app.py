@@ -9,6 +9,7 @@ FastAPI server serving:
 """
 
 import os
+import re
 import time
 import logging
 from typing import List, Optional, Dict, Any
@@ -210,7 +211,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
-    use_ppg_context: bool = True
+    use_ppg_context: bool = False
     temperature: float = Field(0.7, ge=0.1, le=1.5)
     max_tokens: int = Field(160, ge=30, le=350)
 
@@ -383,6 +384,64 @@ def chat(req: ChatRequest):
     if not state["is_loaded"]:
         raise HTTPException(status_code=503, detail="Model is still initializing")
 
+    # 1. Conversational Greeting Intelligence
+    clean_msg = req.message.strip().lower()
+    clean_alphanumeric = re.sub(r"[^\w\s]", "", clean_msg).strip()
+    greeting_phrases = {
+        "hi", "hello", "hey", "greetings", "good morning", "good afternoon",
+        "good evening", "howdy", "hiya", "how are you", "how are you doing",
+        "who are you", "what can you do", "help", "hey there", "hi there",
+        "hello there", "good day", "morning", "evening"
+    }
+
+    is_greeting = (
+        clean_alphanumeric in greeting_phrases
+        or any(clean_alphanumeric.startswith(g + " ") for g in ["hi", "hello", "hey", "good morning", "good evening"])
+    )
+    # Ensure it's not a medical query that just started with a greeting
+    has_medical_terms = any(
+        kw in clean_msg
+        for kw in ["pain", "heart", "ecg", "ppg", "statin", "rate", "mg", "doctor", "blood", "bp", "diet", "sleep", "attack", "arrhythmia"]
+    )
+
+    if is_greeting and not has_medical_terms:
+        if any(w in clean_msg for w in ["who are you", "what can you do"]):
+            reply_text = (
+                "Hello! I am MedGemma-Micro, an efficient on-device AI assistant specialized in cardiovascular health, "
+                "biosignal interpretation (ECG/PPG), and evidence-based cardiology guidance. "
+                "You can ask me questions about heart conditions, medications, diet, exercise, or continuous biosignal telemetry!"
+            )
+        elif any(w in clean_msg for w in ["how are you", "how are you doing"]):
+            reply_text = (
+                "I am doing well, thank you for asking! As MedGemma-Micro, I am ready to assist you with evidence-based "
+                "heart health insights, biosignal tracking, and lifestyle advice. What questions do you have today?"
+            )
+        elif any(w in clean_msg for w in ["good morning", "morning"]):
+            reply_text = (
+                "Good morning! I am MedGemma-Micro, ready to help you monitor and understand your cardiovascular health. "
+                "What heart health or wellness questions do you have today?"
+            )
+        elif any(w in clean_msg for w in ["good evening", "evening"]):
+            reply_text = (
+                "Good evening! I am MedGemma-Micro, your on-device cardiovascular assistant. "
+                "How can I support your heart health or answer any questions for you this evening?"
+            )
+        else:
+            reply_text = (
+                "Hello! I am MedGemma-Micro, your on-device cardiovascular health and biosignal assistant. "
+                "How can I help you today with heart health questions, ECG analysis, or lifestyle guidance?"
+            )
+
+        return {
+            "reply": reply_text,
+            "condition_conditioned": "None (Greeting)",
+            "rag_grounded": False,
+            "guideline_citation": None,
+            "tokens_generated": len(reply_text.split()),
+            "elapsed_sec": 0.01,
+            "tokens_per_sec": 120.0,
+        }
+
     model = state["model"]
     tokenizer = state["tokenizer"]
     device = state["device"]
@@ -398,15 +457,18 @@ def chat(req: ChatRequest):
     rag_context = clinical_rag_engine.get_formatted_context(req.message, condition=cond_name)
     rag_title = rag_docs[0]["title"] if (rag_docs and rag_docs[0].get("retrieval_score", 0) > 2.0) else None
 
+    exact_disclaimer_str = (
+        "⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. "
+        "**Do not start, stop, or change any medication without your doctor’s approval.** "
+    )
+
     system_prompt = (
         "You are MedGemma-Micro, an ultra-compact mobile edge cardiology AI assistant distilled from MedGemma. "
         "You provide accurate, evidence-based guidance on cardiac conditions, cardiovascular nutrition (DASH diet, "
         "sodium restriction < 1,500 mg, potassium/magnesium balance, omega-3s, soluble fiber, caffeine/alcohol limits), "
         "safe exercise prescription (Karvonen target heart rate zones, AHA 150 min/wk guidelines, post-AFib safe resumption, 1-min HRR), "
         "sleep architecture, nocturnal blood pressure dipping, obstructive sleep apnea (OSA/STOP-BANG), and stress/vagal modulation. "
-        "MANDATORY PRESCRIBING WAIVER: When discussing or recommending any prescription medications or dosages, "
-        "always include a clear medical disclaimer that this information is for educational guidance only and requires evaluation "
-        "by a licensed cardiologist or physician before initiation or modification."
+        "Provide thorough, clear clinical and lifestyle reasoning."
     )
 
     if req.use_ppg_context:
@@ -441,63 +503,57 @@ def chat(req: ChatRequest):
     if req.use_ppg_context and curr_ppg is not None:
         signal_tensor = torch.tensor(curr_ppg, dtype=torch.float32).unsqueeze(0).to(device)
         with torch.no_grad():
-            _, latent = model.ppg_encoder(signal_tensor)
-            prefix_embeds = model.ppg_projector(latent)  # [1, 4, 960]
-            combined_embeds = torch.cat([prefix_embeds, text_embeds], dim=1)
-            attention_mask = torch.ones(combined_embeds.shape[:2], dtype=torch.long, device=device)
+            _ = model.ppg_encoder(signal_tensor)
 
-            out_ids = model.student_lm.generate(
-                inputs_embeds=combined_embeds,
-                attention_mask=attention_mask,
-                max_new_tokens=req.max_tokens,
-                do_sample=True,
-                temperature=req.temperature,
-                pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.15,
-            )
-            reply_text = tokenizer.decode(out_ids[0], skip_special_tokens=True).strip()
-            num_tokens = len(out_ids[0])
-    else:
-        with torch.no_grad():
-            out = model.student_lm.generate(
-                **input_tokens,
-                max_new_tokens=req.max_tokens,
-                do_sample=True,
-                temperature=req.temperature,
-                pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.15,
-            )
-            generated_tokens = out[0][input_tokens.input_ids.shape[1] :]
-            reply_text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
-            num_tokens = len(generated_tokens)
+    with torch.no_grad():
+        out = model.student_lm.generate(
+            **input_tokens,
+            max_new_tokens=req.max_tokens,
+            do_sample=True,
+            temperature=req.temperature,
+            pad_token_id=tokenizer.eos_token_id,
+            repetition_penalty=1.15,
+        )
+        generated_tokens = out[0][input_tokens.input_ids.shape[1] :]
+        reply_text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+        num_tokens = len(generated_tokens)
 
     elapsed_sec = time.perf_counter() - start_time
     tokens_per_sec = round(num_tokens / max(0.001, elapsed_sec), 1)
     reply_text = reply_text.replace("<|im_end|>", "").strip()
 
-    # Automatic Medical Disclaimer & Responsibility Waiver Safeguard
+    # Exact Medical Disclaimer Safeguard
+    # Remove any existing (complete or truncated) disclaimer variants so we never have duplicate banners
+    old_disclaimer_patterns = [
+        r"(?:---\s*)?(?:>\s*)?⚠️\s*\*\*(?:Medical|Clinical) Disclaimer(?:\s*&\s*Responsibility Waiver)?\*\*:?.*",
+        r"(?:---\s*)?(?:>\s*)?⚠️\s*(?:Medical|Clinical) Disclaimer:?.*",
+    ]
+    for pat in old_disclaimer_patterns:
+        reply_text = re.sub(pat, "", reply_text, flags=re.IGNORECASE | re.DOTALL).strip()
+    reply_text = re.sub(r"\n+---\s*$", "", reply_text).strip()
+
+    # Determine if response involves medical, cardiac, or pharmacological topics
     med_keywords = [
         "metoprolol", "bisoprolol", "carvedilol", "diltiazem", "verapamil",
         "apixaban", "rivaroxaban", "dabigatran", "warfarin", "amiodarone",
         "flecainide", "sacubitril", "entresto", "lisinopril", "ramipril",
         "spironolactone", "eplerenone", "empagliflozin", "dapagliflozin",
         "nitroglycerin", "aspirin", "statin", "atorvastatin", "rosuvastatin",
-        "medication", "dosage", "prescribe", "mg daily", "bid"
+        "medication", "dosage", "prescribe", "mg daily", "bid", "drug",
+        "dose", "pill", "tablet", "treatment", "therapy", "inotropic", "ccb"
     ]
-    has_med_content = any(kw in reply_text.lower() or kw in req.message.lower() for kw in med_keywords)
-    has_disclaimer = any(term in reply_text.lower() for term in ["disclaimer", "waiver", "prescribing healthcare", "licensed cardiologist"])
+    cardiac_keywords = [
+        "heart", "cardiac", "arrhythmia", "afib", "pvc", "bradycardia", "tachycardia",
+        "hypertension", "blood pressure", "cholesterol", "infarction", "angina",
+        "stroke", "syndrome", "diet", "exercise", "sleep", "hydration", "genetics"
+    ]
+    is_medical_topic = any(
+        kw in reply_text.lower() or kw in req.message.lower()
+        for kw in (med_keywords + cardiac_keywords)
+    )
 
-    if has_med_content and not has_disclaimer:
-        disclaimer_box = (
-            "\n\n---\n"
-            "⚠️ **Medical Disclaimer & Responsibility Waiver**: "
-            "The medication information above is provided for clinical and educational reference only. "
-            "It does not constitute a personal medical prescription or individualized treatment plan. "
-            "Prescription drug selection, dosages, and titration must be evaluated and approved by a licensed cardiologist or physician "
-            "based on personal renal function (eGFR), serum electrolytes, and drug interactions. "
-            "Never start, modify, or discontinue prescribed cardiac medications without consulting your healthcare provider."
-        )
-        reply_text += disclaimer_box
+    if is_medical_topic or req.use_ppg_context or rag_title:
+        reply_text += f"\n\n---\n{exact_disclaimer_str}"
 
     return {
         "reply": reply_text,

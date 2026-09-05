@@ -6,24 +6,105 @@ Curated, high-yield clinical reasoning pairs across:
   2. Acute Coronary Syndrome & CAD (STEMI, NSTEMI, Angina, Emergency Red Flags, Troponin)
   3. Heart Failure & Cardiomyopathies (HFrEF, HFpEF, NYHA classes, GDMT 4 pillars)
   4. Cardiovascular Pharmacology (Beta-blockers, DOACs, CHA2DS2-VASc, Antiarrhythmics, Emergency drugs)
-     -> All medication responses feature mandatory Medical Disclaimer & Responsibility Waiver.
+     -> All medication responses feature mandatory Medical Disclaimer.
   5. Food & Clinical Nutrition (DASH, Mediterranean, Sodium <1500mg, Potassium/Magnesium, Omega-3, Fiber, Alcohol/Caffeine)
   6. Exercise & Cardiac Rehabilitation (AHA 150min guidelines, Target Heart Rate Zones, Post-AFib/MI safe resumption, HRR)
   7. Sleep & Circadian Cardiology (Sleep duration, Nocturnal Dipping, Obstructive Sleep Apnea, STOP-BANG, CPAP-AFib link)
   8. Stress & Autonomic Modulation (Diaphragmatic breathing 6 bpm, Vagal tone, Cortisol/Sympathetic overdrive, Smoking cessation)
 """
 
-from typing import List, Dict
+import os
+import re
+from typing import List, Dict, Optional
 
 MEDICATION_DISCLAIMER = (
-    "\n\n⚠️ **Medical Disclaimer & Responsibility Waiver**: "
-    "The medication information and dosages provided above represent evidence-based clinical guidelines for educational and clinical guidance only. "
-    "This does not constitute a direct prescription or personal medical order. "
-    "Medication selection, dosing, and titrations must be tailored by a licensed cardiologist or physician based on individual renal function (eGFR), serum electrolytes, hepatic profile, and potential drug interactions. "
-    "Never initiate, alter, or discontinue prescribed cardiac medications without direct consultation with your prescribing healthcare provider."
+    "\n\n⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. "
+    "**Do not start, stop, or change any medication without your doctor’s approval.** "
 )
 
-CARDIOLOGY_CURRICULUM: List[Dict[str, str]] = [
+CONVERSATIONAL_GREETINGS: List[Dict[str, str]] = [
+    {
+        "instruction": "Hello",
+        "response": "Hello! I am MedGemma-Micro, your on-device cardiovascular health and biosignal assistant. How can I help you today with heart health questions, ECG analysis, or lifestyle guidance?",
+        "category": "Conversational",
+    },
+    {
+        "instruction": "Hi",
+        "response": "Hi there! I am MedGemma-Micro, your specialized cardiology and biosignal assistant. What cardiovascular or wellness questions can I assist you with today?",
+        "category": "Conversational",
+    },
+    {
+        "instruction": "Hey, how are you?",
+        "response": "I am doing well, thank you for asking! As MedGemma-Micro, I am ready to assist you with evidence-based heart health insights, biosignal tracking, and lifestyle advice. How can I help you today?",
+        "category": "Conversational",
+    },
+    {
+        "instruction": "Good morning",
+        "response": "Good morning! I am MedGemma-Micro, ready to help you monitor and understand your cardiovascular health. What heart health or wellness questions do you have today?",
+        "category": "Conversational",
+    },
+    {
+        "instruction": "Good evening",
+        "response": "Good evening! I am MedGemma-Micro, your on-device cardiovascular assistant. How can I support your heart health or answer any questions for you this evening?",
+        "category": "Conversational",
+    },
+    {
+        "instruction": "Who are you?",
+        "response": "I am MedGemma-Micro, an efficient on-device AI assistant specialized in clinical cardiology, ECG/PPG biosignal analysis, and evidence-based cardiovascular lifestyle medicine.",
+        "category": "Conversational",
+    },
+    {
+        "instruction": "What can you do?",
+        "response": "I can analyze cardiovascular biosignals (PPG and ECG waveforms for arrhythmias like AFib, PVCs, bradycardia), provide evidence-based guidance on heart medications, cardiac diets (DASH/Mediterranean), exercise guidelines, sleep cardiology, and answer questions across our extensive cardiac health database.",
+        "category": "Conversational",
+    },
+]
+
+
+def load_cardiac_qa_curriculum(dataset_path: str = "cardiac_health_dataset.md", max_per_category: Optional[int] = None) -> List[Dict[str, str]]:
+    """Loads and formats Q&A pairs from cardiac_health_dataset.md for student distillation."""
+    if not os.path.exists(dataset_path):
+        return []
+    try:
+        with open(dataset_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception as e:
+        print(f"Warning: Could not read {dataset_path}: {e}")
+        return []
+
+    pattern = r"### Question (\d+)\s*\((.*?)\)\s*\n+\*\*Q:\*\*\s*(.*?)\n+\*\*A:\*\*\s*(.*?)(?=\n+---|### Question|\Z)"
+    matches = re.findall(pattern, text, re.DOTALL)
+    items = []
+    cat_counts: Dict[str, int] = {}
+
+    for q_num, category, question, answer in matches:
+        q_clean = question.strip()
+        a_clean = answer.strip()
+        cat_clean = category.strip()
+
+        if max_per_category is not None:
+            cat_counts[cat_clean] = cat_counts.get(cat_clean, 0) + 1
+            if cat_counts[cat_clean] > max_per_category:
+                continue
+
+        # Attach exact medical disclaimer to medication Q&A items
+        if cat_clean.lower() == "medications" or any(
+            kw in q_clean.lower()
+            for kw in ["statin", "beta-blocker", "aspirin", "diuretic", "ace inhibitor", "nitrate", "anticoagulant", "antiarrhythmic", "pcsk9", "calcium channel"]
+        ):
+            resp = a_clean + MEDICATION_DISCLAIMER
+        else:
+            resp = a_clean
+
+        items.append({
+            "instruction": q_clean,
+            "response": resp,
+            "category": cat_clean,
+        })
+    return items
+
+
+BASE_CARDIOLOGY_CURRICULUM: List[Dict[str, str]] = [
     # -------------------------------------------------------------------------
     # 1. FOOD, NUTRITION & ELECTROLYTES
     # -------------------------------------------------------------------------
@@ -366,3 +447,11 @@ CARDIOLOGY_CURRICULUM: List[Dict[str, str]] = [
         "category": "Pharmacology",
     },
 ]
+
+ALL_CARDIAC_QA_DATASET: List[Dict[str, str]] = load_cardiac_qa_curriculum("cardiac_health_dataset.md", max_per_category=None)
+
+CARDIOLOGY_CURRICULUM: List[Dict[str, str]] = (
+    list(BASE_CARDIOLOGY_CURRICULUM)
+    + list(CONVERSATIONAL_GREETINGS)
+    + list(ALL_CARDIAC_QA_DATASET)
+)

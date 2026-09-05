@@ -9,9 +9,55 @@ cardiology guidelines, drug-drug interaction alerts, and lifestyle recommendatio
 Eliminates hallucination in small language models without external vector databases.
 """
 
+import os
 import math
 import re
 from typing import List, Dict, Any, Optional
+
+
+def load_cardiac_health_dataset(file_path: str = "cardiac_health_dataset.md") -> List[Dict[str, Any]]:
+    """
+    Parses the 1,500 cardiac Q&A pairs from cardiac_health_dataset.md across 10 categories
+    (Medications, Diet and Food, Exercise and Walking, Sleep and Rest, Demographics,
+    Body Composition, Substances, Infections, Hydration, Genetics).
+    """
+    if not os.path.exists(file_path):
+        return []
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception as e:
+        print(f"Warning: Could not read {file_path}: {e}")
+        return []
+
+    pattern = r"### Question (\d+)\s*\((.*?)\)\s*\n+\*\*Q:\*\*\s*(.*?)\n+\*\*A:\*\*\s*(.*?)(?=\n+---|### Question|\Z)"
+    matches = re.findall(pattern, text, re.DOTALL)
+    qa_docs = []
+
+    stop_words = {"what", "which", "when", "where", "with", "from", "does", "have", "that", "this", "your", "their", "affect", "impact"}
+
+    for q_num, category, question, answer in matches:
+        q_clean = question.strip()
+        a_clean = answer.strip()
+        cat_clean = category.strip()
+
+        words = re.findall(r"\b[A-Za-z0-9\-]+\b", f"{cat_clean} {q_clean}")
+        keywords = [w.lower() for w in words if len(w) > 3 and w.lower() not in stop_words]
+
+        qa_docs.append({
+            "id": f"cardiac_qa_{q_num}",
+            "title": f"{cat_clean} Q&A #{q_num}: {q_clean[:60]}",
+            "category": cat_clean,
+            "condition_tag": "Normal Sinus Rhythm",
+            "question": q_clean,
+            "answer": a_clean,
+            "keywords": keywords,
+            "content": f"Question: {q_clean}\nAnswer: {a_clean}",
+            "safety_warning": "",
+        })
+
+    return qa_docs
 
 
 CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
@@ -210,8 +256,20 @@ class ClinicalRAG:
     tailored for mobile on-device guideline grounding.
     """
 
-    def __init__(self, guidelines: List[Dict[str, Any]] = CARDIOLOGY_GUIDELINES):
-        self.guidelines = guidelines
+    def __init__(
+        self,
+        guidelines: Optional[List[Dict[str, Any]]] = None,
+        dataset_path: str = "cardiac_health_dataset.md",
+    ):
+        if guidelines is None:
+            self.guidelines = list(CARDIOLOGY_GUIDELINES)
+        else:
+            self.guidelines = list(guidelines)
+
+        qa_dataset = load_cardiac_health_dataset(dataset_path)
+        if qa_dataset:
+            self.guidelines.extend(qa_dataset)
+
         self._build_index()
 
     def _tokenize(self, text: str) -> List[str]:

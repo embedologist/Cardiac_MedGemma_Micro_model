@@ -98,8 +98,39 @@ def test_api():
     print(f"  -> Generated Lifestyle Guidance:\n{reply_l[:150]}...")
     assert any(term in reply_l.lower() for term in ["dash", "sodium", "salt", "1500", "exercise", "sleep", "apnea", "diet", "dietary", "nutrition", "physical"]), "Should contain lifestyle recommendations"
 
-    # 7. Medication Disclaimer & Responsibility Waiver Verification
-    print("[8/8] Testing Mandatory Medication Disclaimer & Responsibility Waiver...")
+    # 7. Conversational Greeting Handling
+    print("[8/10] Testing Conversational Greeting Intelligence...")
+    greeting_payload = {
+        "message": "Hello!",
+        "use_ppg_context": False,
+        "temperature": 0.6,
+        "max_tokens": 80,
+    }
+    res_g = client.post("/api/chat", json=greeting_payload)
+    assert res_g.status_code == 200
+    reply_g = res_g.json()["reply"]
+    print(f"  -> Generated Greeting Response:\n{reply_g}")
+    assert any(term in reply_g.lower() for term in ["hello", "medgemma", "help", "assistant"]), "Should respond gracefully to greeting"
+    assert "disclaimer" not in reply_g.lower(), "Pure greetings should not have irrelevant medical disclaimers"
+    print("  -> Verified: Friendly greeting response handled gracefully without extraneous disclaimers.")
+
+    # 8. Ingested Cardiac Q&A Dataset Ingestion Check
+    print("[9/10] Testing Ingested Cardiac Health Dataset (Question #1)...")
+    qa_payload = {
+        "message": "What are the potential side effects of statins on heart function?",
+        "use_ppg_context": False,
+        "temperature": 0.6,
+        "max_tokens": 140,
+    }
+    res_qa = client.post("/api/chat", json=qa_payload)
+    assert res_qa.status_code == 200
+    reply_qa = res_qa.json()["reply"]
+    print(f"  -> Generated Q&A Response:\n{reply_qa[:180]}...")
+    assert any(term in reply_qa.lower() for term in ["statin", "side effect", "fatigue", "dizziness", "cardiovascular"]), "Should answer question from cardiac dataset"
+    assert "⚠️ **Medical Disclaimer:**" in reply_qa, "Response must include the exact new medical disclaimer"
+
+    # 9. Exact Medical Disclaimer Verification
+    print("[10/10] Testing Exact Medical Disclaimer on Pharmacotherapy Queries...")
     med_payload = {
         "message": "What medications are prescribed for heart rate control in atrial fibrillation?",
         "use_ppg_context": False,
@@ -110,11 +141,13 @@ def test_api():
     assert res_m.status_code == 200
     reply_m = res_m.json()["reply"]
     print(f"  -> Generated Medication Response:\n{reply_m[:150]}...")
-    assert "disclaimer" in reply_m.lower() or "waiver" in reply_m.lower(), "Medication responses MUST contain a disclaimer or responsibility waiver"
-    print("  -> Verified: Response contains legally compliant medical disclaimer and waiver banner.")
+    
+    exact_disclaimer = "⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor’s approval.** "
+    assert exact_disclaimer.strip() in reply_m, f"Medication response MUST contain exact medical disclaimer! Found:\n{reply_m}"
+    print("  -> Verified: Response contains exact requested medical disclaimer.")
 
     print("=" * 60)
-    print("ALL 8 API, CLINICAL, LIFESTYLE & DISCLAIMER TESTS PASSED!")
+    print("ALL 10 API, GREETING, DATASET & EXACT DISCLAIMER TESTS PASSED!")
     print("=" * 60)
 
 

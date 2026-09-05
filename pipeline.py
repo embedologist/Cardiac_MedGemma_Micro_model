@@ -728,10 +728,14 @@ class ClinicalTextDataset(Dataset):
     def __init__(self, pairs: List[Dict[str, str]], tokenizer: PreTrainedTokenizer, max_length: int = 256):
         self.samples = []
         for item in pairs:
-            # Standard instruction-tuning formatting
-            formatted_text = f"<|im_start|>user\n{item['instruction']}<|im_end|>\n<|im_start|>assistant\n{item['response']}<|im_end|>"
+            prompt_part = f"<|im_start|>user\n{item['instruction']}<|im_end|>\n<|im_start|>assistant\n"
+            full_text = f"{prompt_part}{item['response']}<|im_end|>"
+
+            prompt_ids = tokenizer(prompt_part, add_special_tokens=False)["input_ids"]
+            prompt_len = len(prompt_ids)
+
             encoded = tokenizer(
-                formatted_text,
+                full_text,
                 truncation=True,
                 max_length=max_length,
                 padding="max_length",
@@ -742,6 +746,7 @@ class ClinicalTextDataset(Dataset):
 
             # Labels for causal language modeling: mask user prompt tokens with -100
             labels = input_ids.clone()
+            labels[:min(prompt_len, max_length)] = -100
             labels[labels == tokenizer.pad_token_id] = -100
             self.samples.append({
                 "input_ids": input_ids,

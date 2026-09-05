@@ -32,7 +32,7 @@ def create_notebook():
                 "- **Modality B (Clinical Language Reasoning)**: Distilled student model (`Qwen/Qwen2.5-0.5B-Instruct`, 494M parameters) compressed to 4-bit block-wise quantization with group scales.\n",
                 "- **Clinical RAG Engine**: Sub-25 MB embedded BM25 knowledge retrieval index containing authoritative ACC/AHA and ESC cardiology guidelines (< 1 ms latency).\n",
                 "- **Comprehensive Lifestyle Pillars**: Food & Nutrition (DASH, sodium $<1500\\text{ mg/day}$, K+/Mg2+), Exercise & Cardiac Rehab (AHA guidelines, Karvonen target HR zones), Sleep Medicine (Nocturnal dipping, OSA / STOP-BANG / CPAP), and Stress & Autonomic Modulation (Resonance breathing 6 bpm).\n",
-                "- **Mandatory Prescription Safety**: Standardized Medical Disclaimer & Responsibility Waiver attached to all cardiovascular drug recommendations.\n"
+                "- **Mandatory Prescription Safety**: Standardized Medical Disclaimer attached to all cardiovascular drug recommendations.\n"
             ]
         },
         # --- Cell 2: Dependencies ---
@@ -456,11 +456,8 @@ def create_notebook():
             "source": [
                 "class CardiologyDomainExpert:\n",
                 "    MEDICATION_DISCLAIMER = (\n",
-                "        \"\\n\\n> ⚠️ **Medical Disclaimer & Responsibility Waiver**: \"\n",
-                "        \"The medication information above is provided strictly for educational and informational purposes \"\n",
-                "        \"and does NOT constitute medical advice, diagnosis, or a prescription. Dosages, contraindications, \"\n",
-                "        \"and drug interactions must be evaluated by a licensed cardiologist or physician before initiation, \"\n",
-                "        \"adjustment, or discontinuation. Never alter prescribed therapies without direct clinician supervision.\"\n",
+                "        \"\\n\\n> ⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. \"\n",
+                "        \"**Do not start, stop, or change any medication without your doctor’s approval.** \"\n",
                 "    )\n",
                 "\n",
                 "    EXPERT_PROMPTS = [\n",
@@ -791,7 +788,7 @@ def create_notebook():
                 "1. **Continuous Anomaly Scanning**: The 1D-Conformer runs on the mobile NPU / DSP. Execution time is **~8-12 ms** consuming **< 0.05% battery per hour**.\n",
                 "2. **On-Demand LLM Generation**: The 4-bit student LLM generates cardiology triage and lifestyle guidance at **45-65 tokens/second** on modern mobile chips (Apple A17/A18 Pro, Snapdragon 8 Gen 3).\n",
                 "3. **Zero Cloud Telemetry**: 100% of PPG waveform analysis and clinical reasoning occurs on-device, preserving HIPAA/GDPR medical privacy.\n",
-                "4. **Mandatory Safety Disclaimers**: All medication dosage and pharmacological queries are accompanied by automated Medical Disclaimers & Responsibility Waivers.\n"
+                "4. **Mandatory Safety Disclaimers**: All medication dosage and pharmacological queries are accompanied by automated Medical Disclaimers.\n"
             ]
         }
     ]

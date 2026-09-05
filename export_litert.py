@@ -28,6 +28,17 @@ def export_conformer_to_onnx(output_dir: str = "litert_export", latent_dim: int 
     print("=" * 65)
 
     encoder = PPGConformerEncoder(in_channels=1, num_classes=5, latent_dim=latent_dim)
+    checkpoint_path = "medgemma_micro_cardio_edge.safetensors"
+    if os.path.exists(checkpoint_path):
+        try:
+            import safetensors.torch
+            sd = safetensors.torch.load_file(checkpoint_path)
+            enc_sd = {k.replace("ppg_encoder.", ""): v.to(torch.float32) for k, v in sd.items() if k.startswith("ppg_encoder.")}
+            if enc_sd:
+                encoder.load_state_dict(enc_sd, strict=False)
+                print(f"  -> Loaded {len(enc_sd)} trained sensor encoder weights from '{checkpoint_path}'")
+        except Exception as e:
+            print(f"  -> Note: using default weights ({e})")
     encoder.eval()
 
     example_input = torch.randn(1, 2250, 1)
@@ -63,6 +74,17 @@ def export_projector_to_onnx(output_dir: str = "litert_export", sensor_dim: int 
     """
     os.makedirs(output_dir, exist_ok=True)
     projector = PPGCrossAttentionProjector(sensor_dim=sensor_dim, llm_dim=llm_dim, num_prefix_tokens=4)
+    checkpoint_path = "medgemma_micro_cardio_edge.safetensors"
+    if os.path.exists(checkpoint_path):
+        try:
+            import safetensors.torch
+            sd = safetensors.torch.load_file(checkpoint_path)
+            proj_sd = {k.replace("ppg_projector.", ""): v.to(torch.float32) for k, v in sd.items() if k.startswith("ppg_projector.")}
+            if proj_sd:
+                projector.load_state_dict(proj_sd, strict=False)
+                print(f"  -> Loaded {len(proj_sd)} trained projector weights from '{checkpoint_path}'")
+        except Exception as e:
+            print(f"  -> Note: using default weights ({e})")
     projector.eval()
 
     example_input = torch.randn(1, sensor_dim)

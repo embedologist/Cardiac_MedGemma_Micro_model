@@ -36,7 +36,7 @@ tags:
 | **Modality B (Language)** | Cardiology Reasoning & Lifestyle Management | **MedGemma Distilled Student** (`Qwen2.5-0.5B-Instruct` 4-bit) | Verified |
 | **Multimodal Fusion** | Sensor-to-LLM bridge | **Temporal Cross-Attention Projector** ($K=4$, $d=896$) | Verified |
 | **Guideline Grounding** | Zero-hallucination clinical evidence | **On-Device Clinical RAG** (ACC/AHA & ESC Guidelines < 25 MB) | Verified |
-| **Prescription Safety** | Medical Disclaimer & Responsibility Waiver | Model alignment + deterministic regex safeguard | Verified |
+| **Prescription Safety** | Exact Medical Disclaimer | Model alignment + deterministic safety safeguard | Verified |
 | **Teacher Model** | `google/medgemma-1.5-4b-it` | 4-bit NF4 quantized via `BitsAndBytesConfig` | Verified |
 | **Colab Compatibility** | Free-tier T4/V100/A100 GPU | 100% self-contained runnable notebook + script | Verified |
 
@@ -90,7 +90,7 @@ tags:
                                                                               | - DOACs & CHA2DS2-VASc     |
                                                                               | - DASH Sodium (<1500mg)    |
                                                                               | - Karvonen HR Zones & HRR  |
-                                                                              | - Mandatory Legal Waiver   |
+                                                                              | - Mandatory Medical Disclaimer |
                                                                               +----------------------------+
 ```
 
@@ -104,9 +104,8 @@ MedGemma-Micro provides end-to-end guidance across five cardiology pillars:
 2. **Exercise Physiology & Cardiac Rehabilitation**: AHA target of $\ge 150\text{ min/week}$ moderate physical activity, Karvonen Target Heart Rate zones, post-AFib safe pacing (refraining from HIIT for 24–48 hours), and 1-minute Heart Rate Recovery monitoring ($<12\text{ bpm}$ alert).
 3. **Sleep & Circadian Cardiology**: Restoring nocturnal blood pressure and HR dipping ($10\%\text{--}20\%$), Obstructive Sleep Apnea (OSA) STOP-BANG screening, and emphasizing CPAP compliance to reduce AFib recurrence.
 4. **Stress & Autonomic Modulation**: Diaphragmatic resonance breathing at $6\text{ breaths/minute}$ to stimulate vagal efferent activity and suppress sympathetic catecholaminergic PVC triggers.
-5. **Pharmacotherapy with Mandatory Medical Disclaimer & Responsibility Waiver**: First-line rate control and DOAC stroke prevention guidance paired with a deterministic runtime safeguard that automatically appends:
-   > ⚠️ **Medical Disclaimer & Responsibility Waiver**:
-   > The medication information above is provided strictly for educational and informational purposes and does NOT constitute medical advice, diagnosis, or a prescription. Dosages, contraindications, and drug interactions must be evaluated by a licensed cardiologist or physician before initiation, adjustment, or discontinuation. Never alter prescribed therapies without direct clinician supervision.
+5. **Pharmacotherapy with Mandatory Medical Disclaimer**: First-line rate control and DOAC stroke prevention guidance paired with a deterministic runtime safeguard that automatically appends:
+   > ⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor’s approval.** 
 
 ---
 
@@ -120,14 +119,13 @@ MedGemma-Micro provides end-to-end guidance across five cardiology pillars:
 - [`export_litert.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/export_litert.py): Android LiteRT & GGUF export pipeline targeting Qualcomm Hexagon NPU & Vulkan.
 - [`coreml_export/`](file:///Users/Riaan/Documents/MedGemma_Micro_model/coreml_export): Pre-exported Core ML TorchScript traces for Conformer encoder and projector.
 - [`litert_export/`](file:///Users/Riaan/Documents/MedGemma_Micro_model/litert_export): Pre-exported Android LiteRT / ExecuTorch traces.
-- [`train_and_distill_qwen.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/train_and_distill_qwen.py): MedGemma-to-Qwen distillation, Conformer sensor training, and 4-bit quantization under 512 MB.
-- [`pipeline.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/pipeline.py): Modular neural modules (1D-Conformer, Cross-Attention Projector, Simulator, Unified Model).
-- [`cardiology_curriculum.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/cardiology_curriculum.py): Comprehensive multi-pillar clinical and lifestyle dataset.
+- [`cardiac_health_dataset.md`](file:///Users/Riaan/Documents/MedGemma_Micro_model/cardiac_health_dataset.md): 1,500 curated cardiac health Q&A pairs covering 10 clinical and lifestyle domains.
+- [`cardiology_curriculum.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/cardiology_curriculum.py): Comprehensive multi-pillar clinical, lifestyle, and greeting dataset.
 - [`app.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/app.py): FastAPI backend server with Conformer inference, Clinical RAG injection, and disclaimer safety guard.
 - [`run_interface.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/run_interface.py): Launcher for the interactive web testing dashboard.
 - [`static/`](file:///Users/Riaan/Documents/MedGemma_Micro_model/static): Responsive web dashboard with live physiological waveform visualizer and clinical telemetry.
 - [`test_pipeline.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/test_pipeline.py): Architecture and sub-512MB budget verification test suite (7/7 tests passing).
-- [`test_interface.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/test_interface.py): REST API, PPG classification, Clinical RAG grounding, and legal waiver test suite (8/8 tests passing).
+- [`test_interface.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/test_interface.py): REST API, PPG classification, Clinical RAG grounding, greetings, and exact medical disclaimer test suite (10/10 tests passing).
 
 ---
 
