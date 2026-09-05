@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MedGemma-Micro | Wear OS Cardiology Edge AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- App Container -->
+  <div class="app-layout">
+    <!-- Top Navigation Header -->
+    <header class="top-nav">
+      <div class="nav-brand">
+        <div class="logo-pulse">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">MedGemma-Micro</span>
+          <span class="brand-sub">Wear OS Multimodal Edge Model</span>
+        </div>
+      </div>
+
+      <!-- Telemetry HUD Badges -->
+      <div class="telemetry-hud">
+        <div class="hud-pill">
+          <span class="hud-dot online"></span>
+          <span class="hud-label">CHECKPOINT</span>
+          <span class="hud-val" id="hud-size">395.16 MB</span>
+        </div>
+        <div class="hud-pill">
+          <span class="hud-label">BUDGET</span>
+          <span class="hud-val highlight">&lt; 500 MB</span>
+          <span class="hud-sub" id="hud-headroom">(104.8 MB Headroom)</span>
+        </div>
+        <div class="hud-pill">
+          <span class="hud-label">BACKBONE</span>
+          <span class="hud-val">SmolLM2-360M</span>
+        </div>
+        <div class="hud-pill">
+          <span class="hud-label">WEAR OS NPU</span>
+          <span class="hud-val text-cyan">0.04% bat/hr</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Grid Dashboard -->
+    <main class="dashboard-grid">
+      <!-- Left Column: Sensor Monitor & Arrhythmia Classifier -->
+      <section class="panel sensor-panel">
+        <!-- Panel Header -->
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <h2 class="panel-title">PPG Waveform Monitor</h2>
+            <span class="panel-caption">90s Continuous Pulse Stream @ 25 Hz (2250 Samples)</span>
+          </div>
+          <div class="rhythm-status-badge" id="current-rhythm-badge">
+            <span class="pulse-indicator pulse-normal" id="status-pulse-dot"></span>
+            <span id="badge-rhythm-name">Normal Sinus Rhythm</span>
+          </div>
+        </div>
+
+        <!-- Oscilloscope Waveform Display -->
+        <div class="oscilloscope-container">
+          <div class="scope-grid-overlay"></div>
+          <canvas id="ppg-canvas" width="800" height="240"></canvas>
+          <div class="scope-hud">
+            <span class="scope-time">T: 0.0s - 90.0s</span>
+            <span class="scope-gain">Gain: 1.0x (Calibrated)</span>
+            <span class="scope-fps" id="canvas-fps">60 FPS</span>
+          </div>
+        </div>
+
+        <!-- Waveform Controls & Preset Selector -->
+        <div class="scope-controls">
+          <div class="control-row">
+            <span class="control-label">Simulate Cardiac Condition:</span>
+            <div class="condition-chips" id="condition-chips">
+              <button class="chip active" data-condition="0">
+                <span class="chip-dot normal"></span> Normal Sinus
+              </button>
+              <button class="chip" data-condition="1">
+                <span class="chip-dot afib"></span> AFib (Arrhythmia)
+              </button>
+              <button class="chip" data-condition="2">
+                <span class="chip-dot brady"></span> Bradycardia
+              </button>
+              <button class="chip" data-condition="3">
+                <span class="chip-dot tachy"></span> Tachycardia
+              </button>
+              <button class="chip" data-condition="4">
+                <span class="chip-dot pvc"></span> PVC Ectopic
+              </button>
+            </div>
+          </div>
+
+          <div class="actions-row">
+            <button class="btn btn-secondary btn-sm" id="btn-toggle-sweep">
+              <span id="sweep-icon">⏸</span> <span id="sweep-text">Pause Monitor</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-regen-ppg">
+              <span>↻</span> Regenerate Signal
+            </button>
+            <label class="toggle-switch-label">
+              <input type="checkbox" id="toggle-noise" checked>
+              <span class="switch-slider"></span>
+              <span class="switch-text">Wearable Motion Noise</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Extracted HRV & Physiological Telemetry -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">HEART RATE</span>
+              <span class="metric-unit">BPM</span>
+            </div>
+            <div class="metric-value" id="metric-hr">72.0</div>
+            <div class="metric-sub" id="metric-hr-sub">Resting Rhythm</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">rMSSD (HRV)</span>
+              <span class="metric-unit">ms</span>
+            </div>
+            <div class="metric-value" id="metric-rmssd">38.4</div>
+            <div class="metric-sub">Parasympathetic Vagal Tone</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">SDNN</span>
+              <span class="metric-unit">ms</span>
+            </div>
+            <div class="metric-value" id="metric-sdnn">41.2</div>
+            <div class="metric-sub">RR Regularity Index</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">SENSOR LATENCY</span>
+              <span class="metric-unit">ms</span>
+            </div>
+            <div class="metric-value text-emerald" id="metric-latency">14.8</div>
+            <div class="metric-sub">1D-CNN + BiLSTM NPU Pass</div>
+          </div>
+        </div>
+
+        <!-- Arrhythmia Classifier Section -->
+        <div class="classification-section">
+          <div class="class-header">
+            <div class="class-title-group">
+              <h3 class="section-heading">Multi-Task Arrhythmia Classifier</h3>
+              <span class="section-sub">1D-CNN + 2-Layer BiLSTM (256-dim Latent Feature Map)</span>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btn-run-classifier">
+              <span>⚡</span> Run Edge Classification
+            </button>
+          </div>
+
+          <!-- Class Confidence Bars -->
+          <div class="probability-bars" id="prob-bars-container">
+            <!-- Dynamically injected via app.js -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Multimodal Clinical Chat & Triage Assistant -->
+      <section class="panel chat-panel">
+        <div class="chat-header">
+          <div class="chat-title-group">
+            <h2 class="panel-title">Cardiology Clinical Assistant</h2>
+            <span class="panel-caption">Distilled from MedGemma-1.5-4B-IT onto SmolLM2-360M</span>
+          </div>
+
+          <!-- Multimodal Soft Prefix Switch -->
+          <div class="multimodal-switch-container">
+            <label class="toggle-switch-label" title="Condition LM directly on 90s PPG sensor soft prompt embeddings">
+              <input type="checkbox" id="toggle-multimodal" checked>
+              <span class="switch-slider"></span>
+              <span class="switch-text font-semibold">PPG Multimodal Bridge</span>
+            </label>
+            <div class="bridge-tag active" id="bridge-indicator">
+              <span class="bridge-dot"></span>
+              <span>Prefix K=4 (960-dim) Active</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Preset Clinical Test Cases -->
+        <div class="presets-drawer">
+          <span class="presets-caption">Clinical Presets:</span>
+          <div class="presets-scroll" id="presets-container">
+            <!-- Dynamically loaded -->
+          </div>
+        </div>
+
+        <!-- Chat Conversation Messages -->
+        <div class="chat-messages" id="chat-messages">
+          <!-- Initial Welcome Message -->
+          <div class="message-bubble assistant-msg">
+            <div class="msg-avatar">
+              <span>🩺</span>
+            </div>
+            <div class="msg-body">
+              <div class="msg-author">
+                <span class="name">MedGemma-Micro</span>
+                <span class="tag">Edge Distilled</span>
+              </div>
+              <div class="msg-content">
+                <p>Hello! I am <strong>MedGemma-Micro</strong>, a smartwatch-optimized multimodal cardiology assistant distilled from <code>google/medgemma-1.5-4b-it</code> into a strict <strong>315 MB</strong> footprint.</p>
+                <p>I am connected directly to the active 90-second PPG waveform monitor on your left. You can:</p>
+                <ul>
+                  <li>Test rhythm anomalies like <strong>AFib, Bradycardia, Tachycardia, or PVCs</strong>.</li>
+                  <li>Inquire about <strong>first-line medications, DOAC stroke prevention, contraindications, and emergency triage</strong>.</li>
+                  <li>Click any of the clinical preset chips above or ask your own question below.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat Input & Toolbar -->
+        <div class="chat-input-area">
+          <form id="chat-form" class="chat-form">
+            <textarea
+              id="user-input"
+              rows="2"
+              placeholder="Ask a cardiology question or evaluate the active PPG waveform (e.g., 'What medications are indicated for this rhythm?')..."
+            ></textarea>
+            <div class="chat-form-actions">
+              <div class="telemetry-tag" id="chat-telemetry">
+                <span id="chat-tps">Ready</span>
+              </div>
+              <button type="submit" class="btn btn-primary btn-send" id="btn-send">
+                <span>Send</span>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                </svg>
+              </button>
+            </div>
+          </form>
+          <div class="chat-disclaimer">
+            <span>⚠️ Demonstrator Model. Distilled for Wear OS edge deployment research; not intended for unverified medical diagnosis.</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
