@@ -4,7 +4,7 @@ language:
 - en
 base_model:
 - google/medgemma-1.5-4b-it
-new_version: google/medgemma-1.5-4b-it
+new_version:
 pipeline_tag: text-generation
 tags:
 - cardiac disease
