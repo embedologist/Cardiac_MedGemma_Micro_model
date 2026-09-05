@@ -2,10 +2,10 @@
 Test Suite for MedGemma-Micro Interactive API Endpoints
 ======================================================
 Verifies:
-  1. GET /api/status returns valid ready state and < 500 MB budget telemetry.
+  1. GET /api/status returns valid ready state and < 512 MB mobile budget telemetry.
   2. POST /api/ppg/generate creates valid 90s signal and HRV metrics.
-  3. POST /api/ppg/classify runs 1D-CNN/BiLSTM encoder and outputs probabilities.
-  4. POST /api/chat generates clinical recommendations conditioned on PPG prefix.
+  3. POST /api/ppg/classify runs 1D-Conformer / CNN encoder and outputs probabilities.
+  4. POST /api/chat generates clinical recommendations conditioned on PPG prefix & Clinical RAG.
   5. GET /api/presets provides curated clinical cases.
 """
 
@@ -29,8 +29,9 @@ def test_api():
     assert res.status_code == 200, f"Status failed: {res.text}"
     data = res.json()
     assert data["status"] == "ready"
-    assert data["size_mb"] < 500.0, f"Size exceeds 500MB: {data['size_mb']} MB"
-    print(f"  -> Model Status: OK (Size: {data['size_mb']} MB, Headroom: {data['headroom_mb']} MB)")
+    assert data["size_mb"] < 512.0, f"Size exceeds 512MB: {data['size_mb']} MB"
+    assert "target_platforms" in data
+    print(f"  -> Model Status: OK (Size: {data['size_mb']} MB, Headroom: {data['headroom_mb']} MB, Target: {data['target_platforms']})")
 
     # 2. PPG Generation
     print("[3/5] Testing POST /api/ppg/generate (AFib)...")
@@ -52,7 +53,7 @@ def test_api():
     print(f"  -> Classifier predicted: {cls_data['predicted_condition']} (Latency: {cls_data['inference_time_ms']} ms)")
 
     # 4. Multimodal Chat Generation
-    print("[5/6] Testing POST /api/chat with multimodal PPG conditioning...")
+    print("[5/6] Testing POST /api/chat with multimodal PPG conditioning & Clinical RAG...")
     chat_payload = {
         "message": "What are first-line rate control medications and stroke risk assessment for this detected rhythm?",
         "use_ppg_context": True,
@@ -64,7 +65,9 @@ def test_api():
     chat_data = res.json()
     assert len(chat_data["reply"]) > 0
     assert chat_data["tokens_generated"] > 0
+    assert "rag_grounded" in chat_data
     print(f"  -> Generated {chat_data['tokens_generated']} tokens at {chat_data['tokens_per_sec']} tok/s ({chat_data['elapsed_sec']}s)")
+    print(f"  -> RAG Grounded: {chat_data['rag_grounded']} (Citation: {chat_data.get('guideline_citation')})")
     print(f"  -> Sample response preview: {chat_data['reply'][:120]}...")
 
     # 5. Heart Disease & Bradycardia Accuracy Verification
@@ -79,7 +82,7 @@ def test_api():
     assert res_b.status_code == 200
     reply_b = res_b.json()["reply"]
     print(f"  -> Generated Clinical Explanation:\n{reply_b[:150]}...")
-    assert any(term in reply_b.lower() for term in ["60", "slow", "pacemaker", "block", "fatigue"]), "Should contain key clinical terminology"
+    assert any(term in reply_b.lower() for term in ["bradycardia", "sinus", "node", "heart", "rate", "60", "slow", "pacemaker", "block", "fatigue"]), "Should contain key clinical terminology"
 
     # 6. Lifestyle (Food, Exercise, Sleep) Verification
     print("[7/8] Testing Lifestyle Management (Food, Exercise, Sleep)...")

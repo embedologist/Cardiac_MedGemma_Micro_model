@@ -1,17 +1,19 @@
 """
-MedGemma-Micro: Ultra-Compact Multi-Task Cardiology Edge Model Pipeline
-=======================================================================
-Distilled from `google/medgemma-1.5-4b-it` to an ultra-compact student model
-(SmolLM-135M + 1D-CNN/BiLSTM PPG Encoder + Projection Bridge) for Wear OS smartwatches.
+MedGemma-Micro: Sub-512MB Multi-Task Cardiology Mobile Edge Model Pipeline
+==========================================================================
+Distilled from `google/medgemma-1.5-4b-it` into an ultra-compact student model
+(Qwen2.5-0.5B / SmolLM2 + 1D-Conformer Biosignal Encoder + Cross-Attention Bridge)
+for iOS (Core ML / Metal) and Android (LiteRT / GGUF) mobile devices (>= 8GB RAM).
 
 Target Constraints:
-  - Hardware: Android Smartwatch (Wear OS)
-  - Memory Budget: Combined weights strictly < 500 MB in .safetensors format.
-  - Modality A: 90-second continuous PPG pulse window (25-50 Hz) for anomaly detection.
+  - Hardware: iOS and Android Mobile Devices (>= 8GB RAM)
+  - Memory Budget: Combined weights strictly < 512 MB in .safetensors format.
+  - Modality A: 90-second continuous PPG pulse window (25 Hz) for anomaly detection.
   - Modality B: Student language model for cardiology clinical reasoning.
-  - Modality Fusion: Soft prefix projection bridge conditioning LLM on sensor tokens.
+  - Modality Fusion: Temporal Cross-Attention projection bridge conditioning LLM on sensor tokens.
+  - Clinical RAG: Zero-cloud on-device ACC/AHA & ESC guidelines grounding (< 25 MB).
 
-Author: Principal ML Systems & Edge-AI Engineering
+Author: Principal ML Systems & Mobile Edge-AI Engineering
 """
 
 import os
@@ -145,7 +147,7 @@ class PPGSimulator:
         noise = np.random.normal(0, 0.03, self.num_samples)
         raw_ppg = signal + respiration + low_drift + noise
 
-        # Z-score normalization (standard wearable front-end processing)
+        # Z-score normalization (standard mobile front-end processing)
         normalized_ppg = (raw_ppg - np.mean(raw_ppg)) / (np.std(raw_ppg) + 1e-6)
         return normalized_ppg.reshape(-1, 1).astype(np.float32), condition
 
@@ -170,7 +172,7 @@ class SyntheticPPGDataset(Dataset):
 
 
 # =====================================================================
-# 2. MODALITY A: 1D-CNN + BiLSTM PPG ENCODER & CLASSIFICATION HEAD
+# 2. MODALITY A: 1D-CNN + BiLSTM PPG ENCODER (LEGACY COMPATIBILITY)
 # =====================================================================
 
 class ResidualBlock1D(nn.Module):
@@ -193,9 +195,186 @@ class ResidualBlock1D(nn.Module):
         return self.act2(out + res)
 
 
+# =====================================================================
+# 2B. 1D-CONFORMER BIOSIGNAL ENCODER (PRIMARY MOBILE ARCHITECTURE)
+# =====================================================================
+
+class ConformerFeedForward1D(nn.Module):
+    """Macaron-style Feed-Forward Network with GELU and dropout."""
+
+    def __init__(self, d_model: int = 256, d_ff: int = 512, dropout: float = 0.1):
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model)
+        self.fc1 = nn.Linear(d_model, d_ff)
+        self.act = nn.GELU()
+        self.dropout1 = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(d_ff, d_model)
+        self.dropout2 = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        res = x
+        x = self.norm(x)
+        x = self.dropout1(self.act(self.fc1(x)))
+        x = self.dropout2(self.fc2(x))
+        return res + 0.5 * x  # Macaron half-step residual
+
+
+class ConformerConvModule1D(nn.Module):
+    """
+    Depthwise-Separable Convolution Module for local pulse morphology extraction:
+      LayerNorm -> Pointwise Conv -> GLU -> Depthwise Conv1d (k=15) -> GroupNorm -> GELU -> Pointwise Conv
+    """
+
+    def __init__(self, d_model: int = 256, kernel_size: int = 15, dropout: float = 0.1):
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model)
+        self.pointwise1 = nn.Conv1d(d_model, d_model * 2, kernel_size=1)
+        self.depthwise = nn.Conv1d(
+            d_model,
+            d_model,
+            kernel_size=kernel_size,
+            padding=kernel_size // 2,
+            groups=d_model,
+            bias=False,
+        )
+        self.norm_conv = nn.GroupNorm(8, d_model)
+        self.act = nn.GELU()
+        self.pointwise2 = nn.Conv1d(d_model, d_model, kernel_size=1)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [B, T, D]
+        res = x
+        x = self.norm(x)
+        # Conv1d expects [B, D, T]
+        x = x.transpose(1, 2)
+        x = self.pointwise1(x)
+        # GLU gating
+        x1, x2 = x.chunk(2, dim=1)
+        x = x1 * torch.sigmoid(x2)
+        x = self.act(self.norm_conv(self.depthwise(x)))
+        x = self.dropout(self.pointwise2(x))
+        x = x.transpose(1, 2)
+        return res + x
+
+
+class ConformerBlock1D(nn.Module):
+    """
+    Unified 1D Conformer Block combining:
+      1. Half-step Feed-Forward Module
+      2. Multi-Head Self-Attention Module (MHSA)
+      3. Depthwise-Separable Convolution Module
+      4. Second Half-step Feed-Forward Module
+      5. LayerNorm
+    """
+
+    def __init__(self, d_model: int = 256, n_heads: int = 4, d_ff: int = 512, dropout: float = 0.1):
+        super().__init__()
+        self.ffn1 = ConformerFeedForward1D(d_model, d_ff, dropout)
+        self.norm_mha = nn.LayerNorm(d_model)
+        self.mha = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.dropout_mha = nn.Dropout(dropout)
+        self.conv_module = ConformerConvModule1D(d_model, kernel_size=15, dropout=dropout)
+        self.ffn2 = ConformerFeedForward1D(d_model, d_ff, dropout)
+        self.final_norm = nn.LayerNorm(d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # 1. First FFN
+        x = self.ffn1(x)
+        # 2. Multi-Head Self-Attention
+        normed = self.norm_mha(x)
+        attn_out, _ = self.mha(normed, normed, normed)
+        x = x + self.dropout_mha(attn_out)
+        # 3. Convolution Module
+        x = self.conv_module(x)
+        # 4. Second FFN
+        x = self.ffn2(x)
+        return self.final_norm(x)
+
+
+class PPGConformerEncoder(nn.Module):
+    """
+    Mobile-grade 1D-Conformer Biosignal Encoder for iOS (Core ML) & Android (LiteRT):
+      - Ingests: [Batch, Time=2250 (90s @ 25Hz), Channels=1]
+      - Multi-scale convolutional stem downsamples temporal rate ~32x (2250 -> 70 tokens)
+      - Dual Conformer blocks extract local systolic/diastolic waves & global chaotic RR patterns
+      - Multi-Head Attention Pooling aggregates temporal patches into a global context latent
+      - Outputs:
+          1) 5-class abnormality logits: [Batch, 5]
+          2) Global rhythm latent: [Batch, 256]
+          3) Temporal patch embeddings: [Batch, 70, 256] (for localized Cross-Attention)
+    """
+
+    def __init__(self, in_channels: int = 1, num_classes: int = 5, latent_dim: int = 256, num_layers: int = 2):
+        super().__init__()
+        self.latent_dim = latent_dim
+
+        # Multiscale downsampling stem: 2250 -> 1125 -> 562 -> 281 -> 140 -> 70
+        self.stem = nn.Sequential(
+            nn.Conv1d(in_channels, 32, kernel_size=15, stride=2, padding=7, bias=False),  # 2250 -> 1125
+            nn.GroupNorm(4, 32),
+            nn.GELU(),
+            nn.MaxPool1d(kernel_size=2, stride=2),  # 1125 -> 562
+            nn.Conv1d(32, 64, kernel_size=7, stride=2, padding=3, bias=False),  # 562 -> 281
+            nn.GroupNorm(8, 64),
+            nn.GELU(),
+            nn.MaxPool1d(kernel_size=2, stride=2),  # 281 -> 140
+            nn.Conv1d(64, 128, kernel_size=5, stride=2, padding=2, bias=False),  # 140 -> 70
+            nn.GroupNorm(8, 128),
+            nn.GELU(),
+            nn.Conv1d(128, latent_dim, kernel_size=3, stride=1, padding=1, bias=False),  # 70 -> 70
+            nn.GroupNorm(16, latent_dim),
+            nn.GELU(),
+        )
+
+        # Conformer blocks
+        self.conformer_layers = nn.ModuleList([
+            ConformerBlock1D(d_model=latent_dim, n_heads=4, d_ff=512, dropout=0.1)
+            for _ in range(num_layers)
+        ])
+
+        # Multi-Head Attention Pooling (Learnable query over temporal tokens)
+        self.pool_query = nn.Parameter(torch.randn(1, 1, latent_dim) * 0.02)
+        self.pool_mha = nn.MultiheadAttention(latent_dim, num_heads=4, batch_first=True)
+        self.pool_norm = nn.LayerNorm(latent_dim)
+
+        # Cardiac condition classification head
+        self.classifier = nn.Sequential(
+            nn.Linear(latent_dim, 64),
+            nn.GELU(),
+            nn.Dropout(0.15),
+            nn.Linear(64, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            x: PPG tensor of shape [B, T, C] (e.g. [B, 2250, 1])
+        Returns:
+            logits: [B, num_classes]
+            pooled_latent: [B, latent_dim]
+        """
+        # [B, T, C] -> [B, C, T] for Conv1d
+        x = x.transpose(1, 2)
+        feat = self.stem(x)  # [B, 256, 70]
+        feat = feat.transpose(1, 2)  # [B, 70, 256]
+
+        for layer in self.conformer_layers:
+            feat = layer(feat)
+
+        # Multi-head attention pooling over 70 temporal tokens
+        batch_size = feat.size(0)
+        query = self.pool_query.expand(batch_size, -1, -1)  # [B, 1, 256]
+        pooled, _ = self.pool_mha(query, feat, feat)
+        pooled = self.pool_norm(pooled.squeeze(1))  # [B, 256]
+
+        logits = self.classifier(pooled)
+        return logits, pooled
+
+
 class PPGWaveformEncoder(nn.Module):
     """
-    Ultra-lightweight sensor encoder designed for Wear OS edge execution:
+    Ultra-lightweight sensor encoder designed for edge execution:
       - Ingests: [Batch, Time=2250 (90s @ 25Hz), Channels=1]
       - 1D-CNN front-end downsamples temporal rate ~32x (2250 -> ~71 steps)
       - 2-layer BiLSTM captures cardiac rhythm variability across the 90s window
@@ -282,21 +461,83 @@ class PPGWaveformEncoder(nn.Module):
 
 
 # =====================================================================
-# 3. MODALITY FUSION: PPG-TO-LLM SOFT PROMPT PROJECTION BRIDGE
+# 3. MODALITY FUSION: TEMPORAL CROSS-ATTENTION & PROJECTION BRIDGES
 # =====================================================================
+
+class PPGCrossAttentionProjector(nn.Module):
+    """
+    Temporal Cross-Attention Projection Bridge connecting Conformer / CNN
+    biosignal features to the Qwen2.5-0.5B Student LM (d_model = 896).
+
+    Uses K learnable query tokens that cross-attend to sensor latent representations,
+    producing K rhythm-conditioned soft prompt tokens.
+    """
+
+    def __init__(self, sensor_dim: int = 256, llm_dim: int = 896, num_prefix_tokens: int = 4):
+        super().__init__()
+        self.num_prefix_tokens = num_prefix_tokens
+        self.llm_dim = llm_dim
+        self.sensor_dim = sensor_dim
+
+        # K learnable continuous rhythm query tokens
+        self.queries = nn.Parameter(torch.randn(1, num_prefix_tokens, llm_dim) * 0.02)
+
+        # Projection from sensor_dim to llm_dim
+        self.sensor_proj = nn.Sequential(
+            nn.Linear(sensor_dim, llm_dim),
+            nn.GELU(),
+            nn.LayerNorm(llm_dim),
+        )
+
+        # Cross-attention module
+        self.cross_attn = nn.MultiheadAttention(embed_dim=llm_dim, num_heads=4, batch_first=True)
+        self.norm = nn.LayerNorm(llm_dim)
+
+        # Feed-forward post-processing
+        self.ffn = nn.Sequential(
+            nn.Linear(llm_dim, llm_dim * 2),
+            nn.GELU(),
+            nn.Linear(llm_dim * 2, llm_dim),
+            nn.Dropout(0.1),
+        )
+        self.final_norm = nn.LayerNorm(llm_dim)
+
+    def forward(self, sensor_latent: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            sensor_latent: [B, sensor_dim] or [B, T, sensor_dim]
+        Returns:
+            prefix_embeddings: [B, num_prefix_tokens, llm_dim]
+        """
+        batch_size = sensor_latent.size(0)
+
+        # If 2D [B, sensor_dim], expand to [B, 1, sensor_dim]
+        if sensor_latent.dim() == 2:
+            sensor_tokens = sensor_latent.unsqueeze(1)
+        else:
+            sensor_tokens = sensor_latent
+
+        # Project sensor features to LLM dimension
+        sensor_kv = self.sensor_proj(sensor_tokens)  # [B, T, llm_dim]
+
+        # Expand learnable queries for batch
+        q = self.queries.expand(batch_size, -1, -1)  # [B, K, llm_dim]
+
+        # Cross-attend: queries attend to sensor KV
+        attn_out, _ = self.cross_attn(query=q, key=sensor_kv, value=sensor_kv)
+        x = self.norm(q + attn_out)
+
+        # FFN refinement
+        out = self.final_norm(x + self.ffn(x))
+        return out
+
 
 class PPGToLLMProjector(nn.Module):
     """
-    Projection Bridge connecting the 1D-CNN/BiLSTM sensor encoder to the
-    Student Language Model (SmolLM-135M).
-
-    Maps the 256-dim sensor latent vector into K continuous prefix token embeddings
-    [Batch, K=4, D_LLM=576]. These soft prompt tokens are prepended to the text embeddings,
-    empowering the edge LLM to reason conditionally upon the live PPG waveform
-    with zero inference architecture modifications!
+    Legacy MLP Projection Bridge connecting sensor encoder to Student LM.
     """
 
-    def __init__(self, sensor_dim: int = 256, llm_dim: int = 576, num_prefix_tokens: int = 4):
+    def __init__(self, sensor_dim: int = 256, llm_dim: int = 896, num_prefix_tokens: int = 4):
         super().__init__()
         self.num_prefix_tokens = num_prefix_tokens
         self.llm_dim = llm_dim
@@ -339,7 +580,7 @@ class CardiologyDomainExpert:
         # --- Category 1: Medications ---
         {
             "category": "Medications",
-            "prompt": "Patient with detected Atrial Fibrillation (AFib) on wearable. What are first-line rate control and stroke prevention medications?",
+            "prompt": "Patient with detected Atrial Fibrillation (AFib) on mobile PPG sensor. What are first-line rate control and stroke prevention medications?",
             "teacher_response": "For Atrial Fibrillation rate control, first-line agents include cardioselective beta-blockers (e.g., Metoprolol succinate 25-50mg daily or Bisoprolol) or non-dihydropyridine calcium channel blockers (Diltiazem). For stroke prevention, calculate CHA2DS2-VASc score; Direct Oral Anticoagulants (DOACs like Apixaban 5mg BID or Rivaroxaban) are preferred over Warfarin unless moderate-to-severe mitral stenosis or mechanical heart valves are present. Avoid sudden exertion.",
         },
         {
@@ -361,18 +602,18 @@ class CardiologyDomainExpert:
         # --- Category 3: Symptoms & Clinical Triage ---
         {
             "category": "Symptoms",
-            "prompt": "Wearable sensor flagged sustained tachycardia (>130 bpm). When is this an emergency vs outpatient evaluation?",
+            "prompt": "Mobile PPG sensor flagged sustained tachycardia (>130 bpm). When is this an emergency vs outpatient evaluation?",
             "teacher_response": "Immediate Emergency Department (911) transfer is mandatory if tachycardia is accompanied by 'red flag' symptoms: acute crushing substernal chest pressure, radiation to left arm or jaw (acute coronary syndrome), diaphoresis, exertional dyspnea at rest, presyncope, or true syncope. If patient is completely asymptomatic, resting calmly, and heart rate settles post-hydration, arrange urgent outpatient 12-lead ECG and Holter monitoring.",
         },
         {
             "category": "Symptoms",
-            "prompt": "Patient reports frequent skipped beats (PVCs) on smartwatch. How should symptoms be correlated with clinical risk?",
+            "prompt": "Patient reports frequent skipped beats (PVCs) on mobile PPG monitor. How should symptoms be correlated with clinical risk?",
             "teacher_response": "Isolated premature ventricular contractions (PVCs) in an otherwise structurally normal heart are typically benign. However, frequent palpitations accompanied by dizziness, lightheadedness, or shortness of breath warrant investigation of PVC burden (>10-15% burden risks tachycardia-induced cardiomyopathy). Check serum electrolytes (potassium, magnesium) and order an echocardiogram.",
         },
         # --- Category 4: Post-Anomaly Exercise, Sleep & Autonomic Recovery ---
         {
             "category": "Recovery",
-            "prompt": "What are safe exercise limits and recovery protocols following a paroxysmal AFib episode detected by wearable?",
+            "prompt": "What are safe exercise limits and recovery protocols following a paroxysmal AFib episode detected by mobile PPG sensor?",
             "teacher_response": "Following an acute AFib termination, refrain from high-intensity interval training or heavy resistance loading for at least 24 to 48 hours. Resume low-intensity walking maintaining heart rate strictly below 60-70% of age-predicted heart rate reserve. Monitor 1-minute Heart Rate Recovery (HRR): a drop of < 12 bpm at 1 min post-exercise indicates blunted parasympathetic reactivation.",
         },
         {
@@ -567,15 +808,15 @@ class KnowledgeDistillationLoss(nn.Module):
 
 
 # =====================================================================
-# 6. UNIFIED MULTIMODAL MODEL (PPG + Soft Prefix + SmolLM)
+# 6. UNIFIED MULTIMODAL MODEL (PPG + Soft Prefix + Student LM)
 # =====================================================================
 
 class MedGemmaMicroModel(nn.Module):
     """
-    Unified Multimodal Cardiology Edge Model for Wear OS:
-      - ppg_encoder: 1D-CNN + BiLSTM for 90s PPG waveform anomaly classification.
-      - ppg_projector: MLP bridge mapping sensor latent to K prefix soft tokens.
-      - student_lm: SmolLM-135M-Instruct text model.
+    Unified Multimodal Cardiology Edge Model for Mobile (iOS Core ML & Android LiteRT):
+      - ppg_encoder: 1D-Conformer (or 1D-CNN+BiLSTM) for 90s PPG waveform anomaly classification.
+      - ppg_projector: Temporal Cross-Attention Projector (or MLP) mapping sensor latent to K prefix soft tokens.
+      - student_lm: Qwen2.5-0.5B-Instruct (or SmolLM2) causal language model.
     """
 
     def __init__(
@@ -584,22 +825,41 @@ class MedGemmaMicroModel(nn.Module):
         encoder_in_channels: int = 1,
         encoder_classes: int = 5,
         num_prefix_tokens: int = 4,
+        encoder_type: str = "conformer",
+        projector_type: str = "cross_attention",
     ):
         super().__init__()
         self.student_lm = student_lm
-        self.llm_dim = student_lm.config.hidden_size  # 576 for SmolLM-135M
+        self.llm_dim = getattr(student_lm.config, "hidden_size", 896)
         self.num_prefix_tokens = num_prefix_tokens
+        self.encoder_type = encoder_type
+        self.projector_type = projector_type
 
-        self.ppg_encoder = PPGWaveformEncoder(
-            in_channels=encoder_in_channels,
-            num_classes=encoder_classes,
-            latent_dim=256,
-        )
-        self.ppg_projector = PPGToLLMProjector(
-            sensor_dim=256,
-            llm_dim=self.llm_dim,
-            num_prefix_tokens=num_prefix_tokens,
-        )
+        if encoder_type == "conformer":
+            self.ppg_encoder = PPGConformerEncoder(
+                in_channels=encoder_in_channels,
+                num_classes=encoder_classes,
+                latent_dim=256,
+            )
+        else:
+            self.ppg_encoder = PPGWaveformEncoder(
+                in_channels=encoder_in_channels,
+                num_classes=encoder_classes,
+                latent_dim=256,
+            )
+
+        if projector_type == "cross_attention":
+            self.ppg_projector = PPGCrossAttentionProjector(
+                sensor_dim=256,
+                llm_dim=self.llm_dim,
+                num_prefix_tokens=num_prefix_tokens,
+            )
+        else:
+            self.ppg_projector = PPGToLLMProjector(
+                sensor_dim=256,
+                llm_dim=self.llm_dim,
+                num_prefix_tokens=num_prefix_tokens,
+            )
 
     def forward(
         self,
@@ -679,7 +939,7 @@ class MedGemmaMicroModel(nn.Module):
 # =====================================================================
 
 def run_distillation_and_training(
-    student_id: str = "HuggingFaceTB/SmolLM-135M-Instruct",
+    student_id: str = "Qwen/Qwen2.5-0.5B-Instruct",
     hf_token: Optional[str] = None,
     num_synthetic_pairs: int = 30,
     ppg_dataset_size: int = 60,
@@ -766,7 +1026,7 @@ def run_distillation_and_training(
     )
 
     micro_model.train()
-    logger.info("Training 1D-CNN/BiLSTM PPG Encoder on continuous 90s pulse streams...")
+    logger.info("Training Biosignal PPG Encoder on continuous 90s pulse streams...")
     for epoch in range(epochs):
         cls_loss_total = 0.0
         correct = 0
@@ -795,17 +1055,18 @@ def run_distillation_and_training(
 
 
 # =====================================================================
-# 8. EXPORT AND VERIFICATION (< 500 MB BUDGET ASSERTION)
+# 8. EXPORT AND VERIFICATION (< 512 MB MOBILE BUDGET ASSERTION)
 # =====================================================================
 
 def export_and_verify_checkpoint(
     model: MedGemmaMicroModel,
     output_path: str = "medgemma_micro_cardio_edge.safetensors",
     target_dtype: torch.dtype = torch.float16,
+    budget_limit_mb: float = 512.0,
 ) -> float:
     """
-    Serializes the complete student backbone, PPG encoder, classifier, and projection bridge
-    into a unified .safetensors checkpoint file and strictly asserts < 500 MB size limit.
+    Serializes the complete student backbone, Conformer PPG encoder, classifier, and projection bridge
+    into a unified .safetensors checkpoint file and strictly asserts < 512 MB mobile size limit.
     """
     logger.info("Exporting complete model state dict to '%s'...", output_path)
     model.eval()
@@ -826,10 +1087,13 @@ def export_and_verify_checkpoint(
 
     # Save unified checkpoint via safetensors
     metadata = {
-        "architecture": "MedGemmaMicro-Multimodal-Cardiology",
-        "target_os": "WearOS / Android Smartwatch",
+        "architecture": "MedGemmaMicro-Multimodal-Cardiology-Mobile",
+        "target_os": "iOS (Core ML / Metal) & Android (LiteRT / GGUF)",
+        "min_device_ram": "8GB",
         "sensor_window": "90s @ 25Hz",
-        "student_backbone": "SmolLM-135M-Instruct",
+        "encoder_type": getattr(model, "encoder_type", "conformer"),
+        "projector_type": getattr(model, "projector_type", "cross_attention"),
+        "student_backbone": "Qwen2.5-0.5B-Instruct",
         "distilled_from": "google/medgemma-1.5-4b-it",
         "export_format": "safetensors",
         "precision": str(target_dtype),
@@ -843,15 +1107,15 @@ def export_and_verify_checkpoint(
     logger.info("=" * 60)
     logger.info("EXPORT COMPLETE: %s", output_path)
     logger.info("File Size on Disk: %.2f MB", file_size_mb)
-    logger.info("Target Ceiling Budget: 500.00 MB")
-    logger.info("Remaining Wear OS Headroom: %.2f MB", 500.0 - file_size_mb)
+    logger.info("Target Ceiling Budget: %.2f MB", budget_limit_mb)
+    logger.info("Remaining Mobile Headroom: %.2f MB", budget_limit_mb - file_size_mb)
     logger.info("=" * 60)
 
-    assert file_size_mb < 500.0, (
+    assert file_size_mb < budget_limit_mb, (
         f"CRITICAL CONSTRAINT VIOLATION: Exported model size ({file_size_mb:.2f} MB) "
-        f"exceeds the 500 MB budget for Wear OS!"
+        f"exceeds the {budget_limit_mb} MB mobile budget!"
     )
-    logger.info("[VERIFIED] Checkpoint is under 500 MB constraint! (Budget check passed)")
+    logger.info("[VERIFIED] Checkpoint is strictly under %.2f MB constraint! (Budget check passed)", budget_limit_mb)
     return file_size_mb
 
 
@@ -865,7 +1129,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=2, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
     parser.add_argument("--hf_token", type=str, default=None, help="HuggingFace access token")
-    parser.add_argument("--student_id", type=str, default="HuggingFaceTB/SmolLM-135M-Instruct", help="Student model ID")
+    parser.add_argument("--student_id", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="Student model ID")
     parser.add_argument("--skip_training", action="store_true", help="Quick export/dry-run test without training")
     args = parser.parse_args()
 

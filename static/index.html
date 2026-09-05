@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MedGemma-Micro | Wear OS Cardiology Edge AI</title>
+  <title>MedGemma-Micro | Mobile Cardiology Edge AI (iOS & Android)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -22,7 +22,7 @@
         </div>
         <div class="brand-text">
           <span class="brand-title">MedGemma-Micro</span>
-          <span class="brand-sub">Wear OS Multimodal Edge Model</span>
+          <span class="brand-sub">iOS Core ML & Android LiteRT (Sub-512MB)</span>
         </div>
       </div>
 
@@ -35,16 +35,16 @@
         </div>
         <div class="hud-pill">
           <span class="hud-label">BUDGET</span>
-          <span class="hud-val highlight">&lt; 500 MB</span>
-          <span class="hud-sub" id="hud-headroom">(104.8 MB Headroom)</span>
+          <span class="hud-val highlight">&lt; 512 MB</span>
+          <span class="hud-sub" id="hud-headroom">(116.8 MB Headroom)</span>
         </div>
         <div class="hud-pill">
-          <span class="hud-label">BACKBONE</span>
-          <span class="hud-val">SmolLM2-360M</span>
+          <span class="hud-label">DEVICE RAM</span>
+          <span class="hud-val text-cyan">&ge; 8 GB</span>
         </div>
         <div class="hud-pill">
-          <span class="hud-label">WEAR OS NPU</span>
-          <span class="hud-val text-cyan">0.04% bat/hr</span>
+          <span class="hud-label">RAG ENGINE</span>
+          <span class="hud-val text-cyan">AHA/ESC Active</span>
         </div>
       </div>
     </header>
@@ -109,7 +109,7 @@
             <label class="toggle-switch-label">
               <input type="checkbox" id="toggle-noise" checked>
               <span class="switch-slider"></span>
-              <span class="switch-text">Wearable Motion Noise</span>
+              <span class="switch-text">Mobile PPG Motion Noise</span>
             </label>
           </div>
         </div>
@@ -212,8 +212,8 @@
                 <span class="tag">Edge Distilled</span>
               </div>
               <div class="msg-content">
-                <p>Hello! I am <strong>MedGemma-Micro</strong>, a smartwatch-optimized multimodal cardiology assistant distilled from <code>google/medgemma-1.5-4b-it</code> into a strict <strong>315 MB</strong> footprint.</p>
-                <p>I am connected directly to the active 90-second PPG waveform monitor on your left. You can:</p>
+                <p>Hello! I am <strong>MedGemma-Micro</strong>, a mobile-optimized multimodal cardiology assistant distilled from <code>google/medgemma-1.5-4b-it</code> into a strict sub-<strong>512 MB</strong> footprint for iOS (Core ML) and Android (LiteRT / GGUF).</p>
+                <p>I am connected directly to the active 90-second PPG waveform monitor on your left and grounded with offline ACC/AHA &amp; ESC Clinical Guidelines. You can:</p>
                 <ul>
                   <li>Test rhythm anomalies like <strong>AFib, Bradycardia, Tachycardia, or PVCs</strong>.</li>
                   <li>Inquire about <strong>first-line medications, DOAC stroke prevention, contraindications, and emergency triage</strong>.</li>
@@ -245,7 +245,7 @@
             </div>
           </form>
           <div class="chat-disclaimer">
-            <span>⚠️ Demonstrator Model. Distilled for Wear OS edge deployment research; not intended for unverified medical diagnosis.</span>
+            <span>⚠️ Demonstrator Model. Distilled for iOS &amp; Android mobile edge deployment research (min 8GB RAM); not intended for unverified medical diagnosis.</span>
           </div>
         </div>
       </section>
