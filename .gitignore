@@ -19,3 +19,13 @@ Thumbs.db
 venv/
 .venv/
 env/
+
+# Sensitive files & tokens
+*.env
+.env*
+*token*
+*.pem
+*.key
+.huggingface/
+.cache/
+
