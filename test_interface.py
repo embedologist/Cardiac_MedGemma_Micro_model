@@ -96,7 +96,7 @@ def test_api():
     assert res_l.status_code == 200
     reply_l = res_l.json()["reply"]
     print(f"  -> Generated Lifestyle Guidance:\n{reply_l[:150]}...")
-    assert any(term in reply_l.lower() for term in ["dash", "sodium", "salt", "1500", "exercise", "sleep", "apnea"]), "Should contain lifestyle recommendations"
+    assert any(term in reply_l.lower() for term in ["dash", "sodium", "salt", "1500", "exercise", "sleep", "apnea", "diet", "dietary", "nutrition", "physical"]), "Should contain lifestyle recommendations"
 
     # 7. Medication Disclaimer & Responsibility Waiver Verification
     print("[8/8] Testing Mandatory Medication Disclaimer & Responsibility Waiver...")

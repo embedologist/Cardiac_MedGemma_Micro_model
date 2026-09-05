@@ -51,14 +51,13 @@ def quantize_state_dict_int4(state_dict: Dict[str, torch.Tensor], group_size: in
     q_count = 0
 
     for k, v in state_dict.items():
-        # Quantize 2D projection linear weights of the student LM
+        # Quantize 2D projection linear weights and embedding tables of the student LM
         if (
             v.is_floating_point()
             and "weight" in k
             and v.ndim == 2
             and not k.startswith("ppg_encoder.")
             and not k.startswith("ppg_projector.")
-            and "embed" not in k
         ):
             orig_shape = list(v.shape)
             in_feat = orig_shape[1]
@@ -228,7 +227,8 @@ def run_training_and_quantization(
             labels = labels.to(device)
 
             optimizer_sensor.zero_grad()
-            logits, _ = model.ppg_encoder(waves)
+            enc_out = model.ppg_encoder(waves)
+            logits = enc_out[0] if isinstance(enc_out, tuple) else enc_out
             loss = cls_criterion(logits, labels)
             loss.backward()
             optimizer_sensor.step()

@@ -78,12 +78,23 @@ def load_medgemma_micro_model():
 
     if os.path.exists("medgemma_micro_qwen_0.5b.safetensors"):
         CHECKPOINT_PATH = "medgemma_micro_qwen_0.5b.safetensors"
-        STUDENT_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
     elif os.path.exists("medgemma_micro_cardio_edge.safetensors"):
         CHECKPOINT_PATH = "medgemma_micro_cardio_edge.safetensors"
-        STUDENT_MODEL_ID = "HuggingFaceTB/SmolLM2-360M-Instruct"
     else:
         raise FileNotFoundError("No valid model checkpoint found.")
+
+    # Read metadata if present
+    meta = {}
+    try:
+        with safetensors.safe_open(CHECKPOINT_PATH, framework="pt") as f:
+            meta = f.metadata() or {}
+    except Exception:
+        pass
+
+    STUDENT_MODEL_ID = meta.get(
+        "student_backbone",
+        "Qwen/Qwen2.5-0.5B-Instruct" if "qwen" in CHECKPOINT_PATH else "HuggingFaceTB/SmolLM2-360M-Instruct"
+    )
 
     file_size_bytes = os.path.getsize(CHECKPOINT_PATH)
     state["checkpoint_size_mb"] = round(file_size_bytes / (1024 * 1024), 2)
