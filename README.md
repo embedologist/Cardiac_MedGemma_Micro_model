@@ -1,3 +1,21 @@
+---
+license: apache-2.0
+language:
+- en
+base_model:
+- google/medgemma-1.5-4b-it
+new_version: google/medgemma-1.5-4b-it
+pipeline_tag: text-generation
+tags:
+- cardiac disease
+- medGemma
+- android wear
+- micro model
+- multimodal
+- wearable
+- cardiology
+---
+
 # MedGemma-Micro: Ultra-Compact Multi-Task Cardiology Edge Model
 
 > **Wear OS-optimized Multimodal Edge-AI Architecture distilled from `google/medgemma-1.5-4b-it` under a strict 500 MB `.safetensors` memory budget.**
