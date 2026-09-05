@@ -225,19 +225,20 @@ def run_training_and_quantization(
     ).to(device)
 
     # 4. Train Conformer on Continuous 90s Biosignals
-    print("[Step 4/5] Training 1D-Conformer on continuous 90s PPG waveforms...")
-    ppg_dataset = SyntheticPPGDataset(num_samples=80, sampling_rate=25, duration_sec=90)
+    print("[Step 4/5] Training 1D-Conformer on continuous 90s PPG waveforms (15 epochs, 300 samples)...")
+    ppg_dataset = SyntheticPPGDataset(num_samples=300, sampling_rate=25, duration_sec=90)
     ppg_loader = DataLoader(ppg_dataset, batch_size=batch_size, shuffle=True)
 
     cls_criterion = nn.CrossEntropyLoss()
     optimizer_sensor = torch.optim.AdamW(
         list(model.ppg_encoder.parameters()) + list(model.ppg_projector.parameters()),
-        lr=5e-4,
+        lr=1e-3,
         weight_decay=1e-4,
     )
 
+    sensor_epochs = 15
     model.train()
-    for epoch in range(epochs):
+    for epoch in range(sensor_epochs):
         cls_loss = 0.0
         correct = 0
         total = 0
@@ -258,7 +259,8 @@ def run_training_and_quantization(
             total += labels.size(0)
 
         acc = (correct / total) * 100.0 if total > 0 else 0.0
-        print(f"  -> [Conformer Epoch {epoch+1}/{epochs}] Arrhythmia Loss: {cls_loss/len(ppg_loader):.4f} | Accuracy: {acc:.1f}%", flush=True)
+        if (epoch + 1) % 3 == 0 or epoch == sensor_epochs - 1:
+            print(f"  -> [Conformer Epoch {epoch+1:02d}/{sensor_epochs}] Arrhythmia Loss: {cls_loss/len(ppg_loader):.4f} | Accuracy: {acc:.1f}%", flush=True)
 
     # 5. Quantize to 4-bit & Export Safetensors
     print("[Step 5/5] Quantizing linear weights to 4-bit block-wise and serializing...", flush=True)

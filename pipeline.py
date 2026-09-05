@@ -333,9 +333,7 @@ class PPGConformerEncoder(nn.Module):
             for _ in range(num_layers)
         ])
 
-        # Multi-Head Attention Pooling (Learnable query over temporal tokens)
-        self.pool_query = nn.Parameter(torch.randn(1, 1, latent_dim) * 0.02)
-        self.pool_mha = nn.MultiheadAttention(latent_dim, num_heads=4, batch_first=True)
+        # Temporal LayerNorm
         self.pool_norm = nn.LayerNorm(latent_dim)
 
         # Cardiac condition classification head
@@ -362,11 +360,8 @@ class PPGConformerEncoder(nn.Module):
         for layer in self.conformer_layers:
             feat = layer(feat)
 
-        # Multi-head attention pooling over 70 temporal tokens
-        batch_size = feat.size(0)
-        query = self.pool_query.expand(batch_size, -1, -1)  # [B, 1, 256]
-        pooled, _ = self.pool_mha(query, feat, feat)
-        pooled = self.pool_norm(pooled.squeeze(1))  # [B, 256]
+        # Global rhythm temporal pooling across 70 temporal tokens
+        pooled = self.pool_norm(feat.mean(dim=1))  # [B, 256]
 
         logits = self.classifier(pooled)
         return logits, pooled
