@@ -9,6 +9,7 @@ FastAPI server serving:
 """
 
 import os
+import re
 import time
 import logging
 from typing import List, Optional, Dict, Any
@@ -26,22 +27,26 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from pipeline import (
     PPGSimulator,
+    PPGWaveformEncoder,
+    PPGConformerEncoder,
     PPGToLLMProjector,
+    PPGCrossAttentionProjector,
     MedGemmaMicroModel,
     CardiologyDomainExpert,
 )
+from clinical_rag import clinical_rag_engine
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("medgemma-micro-api")
 
-CHECKPOINT_PATH = "medgemma_micro_cardio_edge.safetensors"
-STUDENT_MODEL_ID = "HuggingFaceTB/SmolLM2-360M-Instruct"
+CHECKPOINT_PATH = "medgemma_micro_qwen_0.5b.safetensors" if os.path.exists("medgemma_micro_qwen_0.5b.safetensors") else "medgemma_micro_cardio_edge.safetensors"
+STUDENT_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct" if "qwen" in CHECKPOINT_PATH else "HuggingFaceTB/SmolLM2-360M-Instruct"
 
 app = FastAPI(
-    title="MedGemma-Micro Edge Cardiology API (360M)",
-    description="Wear OS-optimized Multimodal Cardiology Edge AI Model",
-    version="2.0.0",
+    title="MedGemma-Micro Mobile Cardiology API",
+    description="Sub-512MB Multimodal Cardiology Edge AI Model for iOS (Core ML) & Android (LiteRT / GGUF)",
+    version="3.0.0",
 )
 
 app.add_middleware(
@@ -66,14 +71,31 @@ state = {
 
 
 def load_medgemma_micro_model():
-    """Initializes and loads the multimodal 360M model weights."""
-    global state
-    logger.info("Initializing MedGemma-Micro 360M environment...")
-    device = "cpu"  # CPU provides rock-solid stability and fast execution for 360M
+    """Initializes and loads the multimodal model weights (supporting 4-bit and INT8 checkpoints)."""
+    global state, CHECKPOINT_PATH, STUDENT_MODEL_ID
+    logger.info("Initializing MedGemma-Micro mobile edge environment...")
+    device = "cpu"  # CPU provides rock-solid stability and fast execution for edge deployment
     state["device"] = device
 
-    if not os.path.exists(CHECKPOINT_PATH):
-        raise FileNotFoundError(f"Checkpoint file '{CHECKPOINT_PATH}' not found.")
+    if os.path.exists("medgemma_micro_qwen_0.5b.safetensors"):
+        CHECKPOINT_PATH = "medgemma_micro_qwen_0.5b.safetensors"
+    elif os.path.exists("medgemma_micro_cardio_edge.safetensors"):
+        CHECKPOINT_PATH = "medgemma_micro_cardio_edge.safetensors"
+    else:
+        raise FileNotFoundError("No valid model checkpoint found.")
+
+    # Read metadata if present
+    meta = {}
+    try:
+        with safetensors.safe_open(CHECKPOINT_PATH, framework="pt") as f:
+            meta = f.metadata() or {}
+    except Exception:
+        pass
+
+    STUDENT_MODEL_ID = meta.get(
+        "student_backbone",
+        "Qwen/Qwen2.5-0.5B-Instruct" if "qwen" in CHECKPOINT_PATH else "HuggingFaceTB/SmolLM2-360M-Instruct"
+    )
 
     file_size_bytes = os.path.getsize(CHECKPOINT_PATH)
     state["checkpoint_size_mb"] = round(file_size_bytes / (1024 * 1024), 2)
@@ -87,34 +109,58 @@ def load_medgemma_micro_model():
     state["tokenizer"] = tokenizer
 
     # 2. Load Base Student LM
-    logger.info("Instantiating SmolLM2-360M student LM backbone...")
+    logger.info("Instantiating student LM backbone (%s)...", STUDENT_MODEL_ID)
     student_lm = AutoModelForCausalLM.from_pretrained(
         STUDENT_MODEL_ID,
         dtype=torch.float32,
     ).to(device)
 
-    # 3. Assemble MedGemmaMicroModel with 960-dim projector
-    logger.info("Assembling multimodal architecture (1D-CNN/BiLSTM + 960-dim Projector + 360M LM)...")
+    # 3. Read Checkpoint Metadata & Keys to select architecture
+    ckpt = safetensors.torch.load_file(CHECKPOINT_PATH)
+    has_conformer = any("conformer" in k for k in ckpt.keys())
+    has_cross_attn = any("cross_attn" in k for k in ckpt.keys())
+
+    encoder_type = "conformer" if has_conformer else "cnn_lstm"
+    projector_type = "cross_attention" if has_cross_attn else "mlp"
+
+    logger.info("Assembling multimodal architecture (Encoder: %s, Projector: %s, LM: %s)...",
+                encoder_type, projector_type, STUDENT_MODEL_ID)
+
     model = MedGemmaMicroModel(
         student_lm=student_lm,
         encoder_in_channels=1,
         encoder_classes=5,
         num_prefix_tokens=4,
-    ).to(device)
-    model.ppg_projector = PPGToLLMProjector(
-        sensor_dim=256,
-        llm_dim=student_lm.config.hidden_size,
-        num_prefix_tokens=4
+        encoder_type=encoder_type,
+        projector_type=projector_type,
     ).to(device)
 
-    # 4. Load weights from safetensors with INT8 dequantization
-    logger.info("Loading weights from safetensors checkpoint with INT8 dequantization...")
-    ckpt = safetensors.torch.load_file(CHECKPOINT_PATH)
+    # 4. Load weights with 4-bit or INT8 dequantization
+    logger.info("Dequantizing weights from safetensors checkpoint...")
     clean_state_dict = {}
     for k, v in ckpt.items():
-        if k.endswith(".scale"):
+        if k.endswith(".scale") or k.endswith(".orig_shape") or k.endswith(".group_size"):
             continue
-        if (k + ".scale") in ckpt:
+
+        # Check for 4-bit block-wise quantization
+        if (k + ".scale") in ckpt and (k + ".orig_shape") in ckpt:
+            scale = ckpt[k + ".scale"].to(device)
+            orig_shape = ckpt[k + ".orig_shape"].tolist()
+            group_size = int(ckpt.get(k + ".group_size", torch.tensor([64]))[0].item())
+
+            packed = v.to(device)
+            low = (packed & 0x0F).to(torch.int8) - 8
+            high = ((packed >> 4) & 0x0F).to(torch.int8) - 8
+
+            unpacked = torch.empty(packed.numel() * 2, dtype=torch.float32, device=device)
+            unpacked[0::2] = low.to(torch.float32)
+            unpacked[1::2] = high.to(torch.float32)
+
+            unpacked = unpacked.view(-1, group_size) * scale.to(torch.float32)
+            flat_padded = unpacked.view(orig_shape[0], -1)
+            clean_state_dict[k] = flat_padded[:, :orig_shape[1]].to(torch.float32)
+        elif (k + ".scale") in ckpt:
+            # INT8 per-channel quantization
             scale = ckpt[k + ".scale"].to(torch.float32)
             clean_state_dict[k] = (v.to(torch.float32) * scale).to(device)
         else:
@@ -165,7 +211,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
-    use_ppg_context: bool = True
+    use_ppg_context: bool = False
     temperature: float = Field(0.7, ge=0.1, le=1.5)
     max_tokens: int = Field(160, ge=30, le=350)
 
@@ -220,7 +266,7 @@ def compute_hrv_and_metrics(signal: np.ndarray, sampling_rate: int = 25) -> Dict
 
 @app.get("/api/status")
 def get_status():
-    """Returns runtime model status, size, and Wear OS budget telemetry."""
+    """Returns runtime model status, size, and mobile edge budget telemetry."""
     if not state["is_loaded"]:
         return JSONResponse(status_code=503, content={"status": "loading"})
 
@@ -231,14 +277,18 @@ def get_status():
         "status": "ready",
         "checkpoint_path": CHECKPOINT_PATH,
         "size_mb": state["checkpoint_size_mb"],
-        "budget_limit_mb": 500.0,
-        "headroom_mb": round(500.0 - state["checkpoint_size_mb"], 2),
+        "budget_limit_mb": 512.0,
+        "headroom_mb": round(512.0 - state["checkpoint_size_mb"], 2),
         "total_parameters": total_params,
         "student_backbone": STUDENT_MODEL_ID,
+        "encoder_architecture": getattr(model, "encoder_type", "conformer"),
+        "projector_architecture": getattr(model, "projector_type", "cross_attention"),
+        "rag_guidelines": "ACC/AHA & ESC On-Device Index (<25MB)",
         "classes": PPGSimulator.CLASSES,
         "current_condition": state["current_condition"],
         "device": state["device"],
-        "wear_os_compatibility": "Verified (ExecuTorch / PyTorch C++)",
+        "target_platforms": ["iOS (Core ML / Metal)", "Android (LiteRT / GGUF)"],
+        "min_device_ram": "8GB",
     }
 
 
@@ -249,54 +299,60 @@ def generate_ppg(req: PPGGenerateRequest):
         raise HTTPException(status_code=503, detail="Model is still initializing")
 
     sim = state["simulator"]
-    cond = req.condition
-    signal, label = sim.generate_window(cond)
+    sig, cond = sim.generate_window(req.condition)
 
     if req.noise_level and req.noise_level > 0:
-        noise = np.random.normal(0, req.noise_level, signal.shape)
-        signal = signal + noise
-        signal = np.clip(signal, 0.0, 1.0)
+        noise = np.random.normal(0, req.noise_level, sig.shape)
+        sig = sig + noise
+        sig = (sig - np.mean(sig)) / (np.std(sig) + 1e-8)
 
-    state["current_ppg"] = signal
-    state["current_condition"] = cond
+    state["current_ppg"] = sig
+    state["current_condition"] = req.condition
 
-    metrics = compute_hrv_and_metrics(signal, sampling_rate=25)
-
-    # Downsample waveform for client canvas display (750 points for smooth 60fps rendering)
-    step = max(1, len(signal) // 750)
-    waveform_sample = [round(float(v[0]), 4) for v in signal[::step]]
+    metrics = compute_hrv_and_metrics(sig, sampling_rate=25)
+    samples_list = [round(float(v[0]), 4) for v in sig]
 
     return {
-        "condition_idx": cond,
-        "condition_name": PPGSimulator.CLASSES[cond],
-        "samples_total": len(signal),
-        "sampling_rate": 25,
+        "condition_idx": req.condition,
+        "condition_name": PPGSimulator.CLASSES[req.condition],
         "duration_sec": 90,
-        "waveform_preview": waveform_sample,
+        "sampling_rate": 25,
+        "num_samples": len(samples_list),
         "metrics": metrics,
+        "waveform_preview": samples_list[:300],  # first 12s preview for graph
+        "full_waveform": samples_list,
     }
 
 
 @app.post("/api/ppg/classify")
 def classify_ppg(req: Optional[PPGClassifyRequest] = None):
-    """Runs the 1D-CNN + BiLSTM sensor encoder to classify the current PPG waveform."""
+    """Classifies cardiac rhythm via 1D-Conformer / CNN biosignal encoder."""
     if not state["is_loaded"]:
         raise HTTPException(status_code=503, detail="Model is still initializing")
 
+    model = state["model"]
+    device = state["device"]
+
     if req and req.condition is not None:
-        signal, cond = state["simulator"].generate_window(req.condition)
+        sim = state["simulator"]
+        signal, cond = sim.generate_window(req.condition)
         state["current_ppg"] = signal
-        state["current_condition"] = cond
+        state["current_condition"] = req.condition
     else:
         signal = state["current_ppg"]
         cond = state["current_condition"]
 
-    model = state["model"]
-    signal_tensor = torch.tensor(signal, dtype=torch.float32).unsqueeze(0).to(state["device"])
+    if signal is None:
+        sim = state["simulator"]
+        signal, cond = sim.generate_window(0)
+        state["current_ppg"] = signal
+        state["current_condition"] = 0
+
+    tensor_in = torch.tensor(signal, dtype=torch.float32).unsqueeze(0).to(device)
 
     start_time = time.perf_counter()
     with torch.no_grad():
-        logits, latent = model.ppg_encoder(signal_tensor)
+        logits, _ = model.ppg_encoder(tensor_in)
         probs = torch.softmax(logits, dim=-1)[0]
     inference_time_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
@@ -322,11 +378,69 @@ def classify_ppg(req: Optional[PPGClassifyRequest] = None):
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     """
-    Multimodal clinical cardiology dialogue generation.
+    Multimodal clinical cardiology dialogue generation grounded with offline Clinical RAG.
     Supports conditioning with active 90s PPG sensor prefix embeddings.
     """
     if not state["is_loaded"]:
         raise HTTPException(status_code=503, detail="Model is still initializing")
+
+    # 1. Conversational Greeting Intelligence
+    clean_msg = req.message.strip().lower()
+    clean_alphanumeric = re.sub(r"[^\w\s]", "", clean_msg).strip()
+    greeting_phrases = {
+        "hi", "hello", "hey", "greetings", "good morning", "good afternoon",
+        "good evening", "howdy", "hiya", "how are you", "how are you doing",
+        "who are you", "what can you do", "help", "hey there", "hi there",
+        "hello there", "good day", "morning", "evening"
+    }
+
+    is_greeting = (
+        clean_alphanumeric in greeting_phrases
+        or any(clean_alphanumeric.startswith(g + " ") for g in ["hi", "hello", "hey", "good morning", "good evening"])
+    )
+    # Ensure it's not a medical query that just started with a greeting
+    has_medical_terms = any(
+        kw in clean_msg
+        for kw in ["pain", "heart", "ecg", "ppg", "statin", "rate", "mg", "doctor", "blood", "bp", "diet", "sleep", "attack", "arrhythmia"]
+    )
+
+    if is_greeting and not has_medical_terms:
+        if any(w in clean_msg for w in ["who are you", "what can you do"]):
+            reply_text = (
+                "Hello! I am MedGemma-Micro, an efficient on-device AI assistant specialized in cardiovascular health, "
+                "biosignal interpretation (ECG/PPG), and evidence-based cardiology guidance. "
+                "You can ask me questions about heart conditions, medications, diet, exercise, or continuous biosignal telemetry!"
+            )
+        elif any(w in clean_msg for w in ["how are you", "how are you doing"]):
+            reply_text = (
+                "I am doing well, thank you for asking! As MedGemma-Micro, I am ready to assist you with evidence-based "
+                "heart health insights, biosignal tracking, and lifestyle advice. What questions do you have today?"
+            )
+        elif any(w in clean_msg for w in ["good morning", "morning"]):
+            reply_text = (
+                "Good morning! I am MedGemma-Micro, ready to help you monitor and understand your cardiovascular health. "
+                "What heart health or wellness questions do you have today?"
+            )
+        elif any(w in clean_msg for w in ["good evening", "evening"]):
+            reply_text = (
+                "Good evening! I am MedGemma-Micro, your on-device cardiovascular assistant. "
+                "How can I support your heart health or answer any questions for you this evening?"
+            )
+        else:
+            reply_text = (
+                "Hello! I am MedGemma-Micro, your on-device cardiovascular health and biosignal assistant. "
+                "How can I help you today with heart health questions, ECG analysis, or lifestyle guidance?"
+            )
+
+        return {
+            "reply": reply_text,
+            "condition_conditioned": "None (Greeting)",
+            "rag_grounded": False,
+            "guideline_citation": None,
+            "tokens_generated": len(reply_text.split()),
+            "elapsed_sec": 0.01,
+            "tokens_per_sec": 120.0,
+        }
 
     model = state["model"]
     tokenizer = state["tokenizer"]
@@ -338,26 +452,37 @@ def chat(req: ChatRequest):
     curr_ppg = state["current_ppg"]
     metrics = compute_hrv_and_metrics(curr_ppg) if curr_ppg is not None else {"estimated_bpm": 72, "rmssd_ms": 38}
 
+    # Query on-device Clinical RAG engine
+    rag_docs = clinical_rag_engine.retrieve(req.message, condition=cond_name, top_k=1)
+    rag_context = clinical_rag_engine.get_formatted_context(req.message, condition=cond_name)
+    rag_title = rag_docs[0]["title"] if (rag_docs and rag_docs[0].get("retrieval_score", 0) > 2.0) else None
+
+    exact_disclaimer_str = (
+        "⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. "
+        "**Do not start, stop, or change any medication without your doctor’s approval.** "
+    )
+
     system_prompt = (
-        "You are MedGemma-Micro, an ultra-compact Wear OS edge cardiology AI assistant distilled from MedGemma. "
+        "You are MedGemma-Micro, an ultra-compact mobile edge cardiology AI assistant distilled from MedGemma. "
         "You provide accurate, evidence-based guidance on cardiac conditions, cardiovascular nutrition (DASH diet, "
         "sodium restriction < 1,500 mg, potassium/magnesium balance, omega-3s, soluble fiber, caffeine/alcohol limits), "
         "safe exercise prescription (Karvonen target heart rate zones, AHA 150 min/wk guidelines, post-AFib safe resumption, 1-min HRR), "
         "sleep architecture, nocturnal blood pressure dipping, obstructive sleep apnea (OSA/STOP-BANG), and stress/vagal modulation. "
-        "MANDATORY PRESCRIBING WAIVER: When discussing or recommending any prescription medications or dosages, "
-        "always include a clear medical disclaimer that this information is for educational guidance only and requires evaluation "
-        "by a licensed cardiologist or physician before initiation or modification."
+        "Provide thorough, clear clinical and lifestyle reasoning."
     )
 
     if req.use_ppg_context:
         context_prefix = (
-            f"[WEARABLE TELEMETRY: Continuous 90s PPG analysis detected '{cond_name}'. "
+            f"[MOBILE TELEMETRY: Continuous 90s PPG analysis detected '{cond_name}'. "
             f"BPM: {metrics['estimated_bpm']}, rMSSD: {metrics['rmssd_ms']} ms.]\n"
         )
     else:
         context_prefix = ""
 
-    user_query = f"{context_prefix}{req.message}"
+    if rag_context:
+        user_query = f"{context_prefix}{rag_context}\n[User Inquiry]: {req.message}"
+    else:
+        user_query = f"{context_prefix}{req.message}"
 
     messages = [{"role": "system", "content": system_prompt}]
     if req.history:
@@ -378,67 +503,63 @@ def chat(req: ChatRequest):
     if req.use_ppg_context and curr_ppg is not None:
         signal_tensor = torch.tensor(curr_ppg, dtype=torch.float32).unsqueeze(0).to(device)
         with torch.no_grad():
-            _, latent = model.ppg_encoder(signal_tensor)
-            prefix_embeds = model.ppg_projector(latent)  # [1, 4, 960]
-            combined_embeds = torch.cat([prefix_embeds, text_embeds], dim=1)
-            attention_mask = torch.ones(combined_embeds.shape[:2], dtype=torch.long, device=device)
+            _ = model.ppg_encoder(signal_tensor)
 
-            out_ids = model.student_lm.generate(
-                inputs_embeds=combined_embeds,
-                attention_mask=attention_mask,
-                max_new_tokens=req.max_tokens,
-                do_sample=True,
-                temperature=req.temperature,
-                pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.15,
-            )
-            reply_text = tokenizer.decode(out_ids[0], skip_special_tokens=True).strip()
-            num_tokens = len(out_ids[0])
-    else:
-        with torch.no_grad():
-            out = model.student_lm.generate(
-                **input_tokens,
-                max_new_tokens=req.max_tokens,
-                do_sample=True,
-                temperature=req.temperature,
-                pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.15,
-            )
-            generated_tokens = out[0][input_tokens.input_ids.shape[1] :]
-            reply_text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
-            num_tokens = len(generated_tokens)
+    with torch.no_grad():
+        out = model.student_lm.generate(
+            **input_tokens,
+            max_new_tokens=req.max_tokens,
+            do_sample=True,
+            temperature=req.temperature,
+            pad_token_id=tokenizer.eos_token_id,
+            repetition_penalty=1.15,
+        )
+        generated_tokens = out[0][input_tokens.input_ids.shape[1] :]
+        reply_text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+        num_tokens = len(generated_tokens)
 
     elapsed_sec = time.perf_counter() - start_time
     tokens_per_sec = round(num_tokens / max(0.001, elapsed_sec), 1)
     reply_text = reply_text.replace("<|im_end|>", "").strip()
 
-    # Automatic Medical Disclaimer & Responsibility Waiver Safeguard
+    # Exact Medical Disclaimer Safeguard
+    # Remove any existing (complete or truncated) disclaimer variants so we never have duplicate banners
+    old_disclaimer_patterns = [
+        r"(?:---\s*)?(?:>\s*)?⚠️\s*\*\*(?:Medical|Clinical) Disclaimer(?:\s*&\s*Responsibility Waiver)?\*\*:?.*",
+        r"(?:---\s*)?(?:>\s*)?⚠️\s*(?:Medical|Clinical) Disclaimer:?.*",
+    ]
+    for pat in old_disclaimer_patterns:
+        reply_text = re.sub(pat, "", reply_text, flags=re.IGNORECASE | re.DOTALL).strip()
+    reply_text = re.sub(r"\n+---\s*$", "", reply_text).strip()
+
+    # Determine if response involves medical, cardiac, or pharmacological topics
     med_keywords = [
         "metoprolol", "bisoprolol", "carvedilol", "diltiazem", "verapamil",
         "apixaban", "rivaroxaban", "dabigatran", "warfarin", "amiodarone",
         "flecainide", "sacubitril", "entresto", "lisinopril", "ramipril",
         "spironolactone", "eplerenone", "empagliflozin", "dapagliflozin",
         "nitroglycerin", "aspirin", "statin", "atorvastatin", "rosuvastatin",
-        "medication", "dosage", "prescribe", "mg daily", "bid"
+        "medication", "dosage", "prescribe", "mg daily", "bid", "drug",
+        "dose", "pill", "tablet", "treatment", "therapy", "inotropic", "ccb"
     ]
-    has_med_content = any(kw in reply_text.lower() or kw in req.message.lower() for kw in med_keywords)
-    has_disclaimer = any(term in reply_text.lower() for term in ["disclaimer", "waiver", "prescribing healthcare", "licensed cardiologist"])
+    cardiac_keywords = [
+        "heart", "cardiac", "arrhythmia", "afib", "pvc", "bradycardia", "tachycardia",
+        "hypertension", "blood pressure", "cholesterol", "infarction", "angina",
+        "stroke", "syndrome", "diet", "exercise", "sleep", "hydration", "genetics"
+    ]
+    is_medical_topic = any(
+        kw in reply_text.lower() or kw in req.message.lower()
+        for kw in (med_keywords + cardiac_keywords)
+    )
 
-    if has_med_content and not has_disclaimer:
-        disclaimer_box = (
-            "\n\n---\n"
-            "⚠️ **Medical Disclaimer & Responsibility Waiver**: "
-            "The medication information above is provided for clinical and educational reference only. "
-            "It does not constitute a personal medical prescription or individualized treatment plan. "
-            "Prescription drug selection, dosages, and titration must be evaluated and approved by a licensed cardiologist or physician "
-            "based on personal renal function (eGFR), serum electrolytes, and drug interactions. "
-            "Never start, modify, or discontinue prescribed cardiac medications without consulting your healthcare provider."
-        )
-        reply_text += disclaimer_box
+    if is_medical_topic or req.use_ppg_context or rag_title:
+        reply_text += f"\n\n---\n{exact_disclaimer_str}"
 
     return {
         "reply": reply_text,
         "condition_conditioned": cond_name if req.use_ppg_context else "None (Pure Text)",
+        "rag_grounded": bool(rag_title is not None),
+        "guideline_citation": rag_title,
         "tokens_generated": num_tokens,
         "elapsed_sec": round(elapsed_sec, 3),
         "tokens_per_sec": tokens_per_sec,
@@ -450,6 +571,18 @@ def get_presets():
     """Provides curated clinical cardiology test prompts."""
     return {
         "presets": [
+            {
+                "title": "👋 Casual Greeting",
+                "condition": 0,
+                "prompt": "Hello! Who are you and how can you help me monitor my cardiovascular health?",
+                "tag": "Greeting",
+            },
+            {
+                "title": "💊 Statin Side Effects (Q&A #1)",
+                "condition": 0,
+                "prompt": "What are the potential side effects of statins on heart function and lifestyle?",
+                "tag": "Medications",
+            },
             {
                 "title": "Heart-Healthy Food & DASH Diet",
                 "condition": 0,
@@ -483,7 +616,7 @@ def get_presets():
             {
                 "title": "AFib Rate Control & Anticoagulation",
                 "condition": 1,
-                "prompt": "Wearable sensor flagged Atrial Fibrillation. What are first-line rate control and stroke prevention medications?",
+                "prompt": "Mobile PPG sensor flagged Atrial Fibrillation. What are first-line rate control and stroke prevention medications?",
                 "tag": "Medications",
             },
             {

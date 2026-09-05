@@ -1,11 +1,11 @@
 """
-Training & INT8 Quantization Script for MedGemma-Micro-360M
-==========================================================
+Training & INT8 Quantization Script for MedGemma-Micro-360M (Legacy Backbone)
+=============================================================================
 Executes:
   1. Fine-tuning SmolLM2-360M-Instruct on Full-Spectrum Cardiology Curriculum.
   2. Training / adapting PPGToLLMProjector to 960-dim embedding space.
   3. Packaging unified model into .safetensors with INT8 per-channel quantization.
-  4. Strictly asserting file size < 500 MB (Target: ~390 MB).
+  4. Strictly asserting file size < 512 MB (Target: ~390 MB).
 """
 
 import os
@@ -164,11 +164,11 @@ def main():
 
     metadata = {
         "architecture": "MedGemmaMicro-Multimodal-Cardiology-360M",
-        "target_os": "WearOS / Android Smartwatch",
+        "target_os": "Mobile (iOS / Android >= 8GB RAM)",
         "student_backbone": STUDENT_ID,
         "parameters": str(sum(p.numel() for p in model.parameters())),
         "precision": "INT8 (Linear) + FP16 (Norms/Embeds/Sensor)",
-        "budget_limit_mb": "500.00",
+        "budget_limit_mb": "512.00",
         "size_mb": f"{size_mb:.2f}",
     }
 
@@ -179,12 +179,12 @@ def main():
     print("UPGRADE & EXPORT COMPLETE!")
     print(f"File: {OUTPUT_PATH}")
     print(f"File Size on Disk: {actual_file_size:.2f} MB")
-    print(f"Ceiling Budget: 500.00 MB")
-    print(f"Remaining Headroom: {500.0 - actual_file_size:.2f} MB")
+    print(f"Ceiling Budget: 512.00 MB")
+    print(f"Remaining Headroom: {512.0 - actual_file_size:.2f} MB")
     print("=" * 65)
 
-    assert actual_file_size < 500.0, f"Exceeded 500 MB budget: {actual_file_size:.2f} MB"
-    print("[VERIFIED] Checkpoint successfully serialized below 500 MB constraint!")
+    assert actual_file_size < 512.0, f"Exceeded 512 MB budget: {actual_file_size:.2f} MB"
+    print("[VERIFIED] Checkpoint successfully serialized below 512 MB constraint!")
 
 
 if __name__ == "__main__":
