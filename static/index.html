@@ -174,19 +174,19 @@
         <div class="chat-header">
           <div class="chat-title-group">
             <h2 class="panel-title">Cardiology Clinical Assistant</h2>
-            <span class="panel-caption">Distilled from MedGemma-1.5-4B-IT onto SmolLM2-360M</span>
+            <span class="panel-caption">Distilled from MedGemma-1.5-4B-IT onto Qwen2.5-0.5B (4-bit)</span>
           </div>
 
           <!-- Multimodal Soft Prefix Switch -->
           <div class="multimodal-switch-container">
             <label class="toggle-switch-label" title="Condition LM directly on 90s PPG sensor soft prompt embeddings">
-              <input type="checkbox" id="toggle-multimodal" checked>
+              <input type="checkbox" id="toggle-multimodal">
               <span class="switch-slider"></span>
-              <span class="switch-text font-semibold">PPG Multimodal Bridge</span>
+              <span class="switch-text font-semibold">PPG Multimodal Telemetry</span>
             </label>
             <div class="bridge-tag active" id="bridge-indicator">
               <span class="bridge-dot"></span>
-              <span>Prefix K=4 (960-dim) Active</span>
+              <span>1D-Conformer + Cross-Attention Active</span>
             </div>
           </div>
         </div>

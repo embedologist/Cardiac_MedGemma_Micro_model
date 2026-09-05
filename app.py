@@ -572,6 +572,18 @@ def get_presets():
     return {
         "presets": [
             {
+                "title": "👋 Casual Greeting",
+                "condition": 0,
+                "prompt": "Hello! Who are you and how can you help me monitor my cardiovascular health?",
+                "tag": "Greeting",
+            },
+            {
+                "title": "💊 Statin Side Effects (Q&A #1)",
+                "condition": 0,
+                "prompt": "What are the potential side effects of statins on heart function and lifestyle?",
+                "tag": "Medications",
+            },
+            {
                 "title": "Heart-Healthy Food & DASH Diet",
                 "condition": 0,
                 "prompt": "What is the best diet and food plan for heart disease, high blood pressure, and preventing arrhythmia episodes?",
