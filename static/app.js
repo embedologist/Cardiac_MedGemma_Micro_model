@@ -405,6 +405,7 @@ async function handleChatSubmit(e) {
 
   // Append User message
   appendMessage('user', text);
+  const priorHistory = STATE.chatHistory.slice(-4);
   STATE.chatHistory.push({ role: 'user', content: text });
 
   // Append Thinking placeholder
@@ -416,8 +417,10 @@ async function handleChatSubmit(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: text,
-        history: STATE.chatHistory.slice(-4),
+        history: priorHistory,
         use_ppg_context: STATE.useMultimodal,
+        condition: STATE.condition,
+        metrics: STATE.metrics,
         temperature: 0.65,
         max_tokens: 180
       })
@@ -452,8 +455,18 @@ async function handleChatSubmit(e) {
 // Event Listeners
 // =====================================================================
 
+function appendConditionChangeNotification(name) {
+  const notifEl = document.createElement('div');
+  notifEl.className = 'session-divider';
+  notifEl.style.cssText = 'text-align: center; margin: 10px 0; padding: 4px 12px; background: rgba(0, 240, 255, 0.08); border-radius: 20px; color: #00f0ff; font-size: 11px; font-weight: 600;';
+  notifEl.innerHTML = `<span>⚡ Telemetry switched to: <strong>${escapeHtml(name)}</strong></span>`;
+  chatMessages.appendChild(notifEl);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
 function selectCondition(condIdx) {
   condIdx = parseInt(condIdx);
+  const isChanged = STATE.condition !== condIdx;
   STATE.condition = condIdx;
 
   // Update chip active states
@@ -461,6 +474,12 @@ function selectCondition(condIdx) {
   chips.forEach(c => {
     c.classList.toggle('active', parseInt(c.dataset.condition) === condIdx);
   });
+
+  // If switching condition, clear old conversational history to prevent rhythm cross-contamination
+  if (isChanged) {
+    STATE.chatHistory = [];
+    appendConditionChangeNotification(STATE.conditionNames[condIdx]);
+  }
 
   const noise = toggleNoise.checked ? 0.04 : 0.0;
   generateWaveform(condIdx, noise);
@@ -506,6 +525,17 @@ toggleMultimodal.addEventListener('change', () => {
 document.getElementById('btn-run-classifier').addEventListener('click', () => {
   runClassification();
 });
+
+const btnClearChat = document.getElementById('btn-clear-chat');
+if (btnClearChat) {
+  btnClearChat.addEventListener('click', () => {
+    STATE.chatHistory = [];
+    chatMessages.innerHTML = '';
+    const condName = STATE.conditionNames[STATE.condition] || 'Normal Sinus Rhythm';
+    const bpm = STATE.metrics.estimated_bpm || 72;
+    appendMessage('assistant', `Conversation history cleared. Actively monitoring **${condName}** (${bpm} BPM). How can I assist with your telemetry or cardiology questions?`);
+  });
+}
 
 chatForm.addEventListener('submit', handleChatSubmit);
 userInput.addEventListener('keydown', e => {

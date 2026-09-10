@@ -17,9 +17,15 @@ from typing import List, Dict, Any, Optional
 
 def load_cardiac_health_dataset(file_path: str = "cardiac_health_dataset.md") -> List[Dict[str, Any]]:
     """
-    Parses the 1,500 cardiac Q&A pairs from cardiac_health_dataset.md across 10 categories
+    Parses the 1,500 curated cardiac Q&A pairs from cardiac_health_dataset.md across 10 categories
     (Medications, Diet and Food, Exercise and Walking, Sleep and Rest, Demographics,
     Body Composition, Substances, Infections, Hydration, Genetics).
+
+    Index Partitioning Design:
+      - All lifestyle and disease management Q&A pairs are tagged as 'General Cardiology'.
+      - This partitions general cardiovascular knowledge from active telemetry guidelines
+        (AFib, Bradycardia, Tachycardia, PVC, Normal Sinus), preventing generic user inquiries
+        (e.g., 'What does my reading show?') from inadvertently retrieving lifestyle items.
     """
     if not os.path.exists(file_path):
         return []
@@ -49,7 +55,8 @@ def load_cardiac_health_dataset(file_path: str = "cardiac_health_dataset.md") ->
             "id": f"cardiac_qa_{q_num}",
             "title": f"{cat_clean} Q&A #{q_num}: {q_clean[:60]}",
             "category": cat_clean,
-            "condition_tag": "Normal Sinus Rhythm",
+            # Explicitly partition under General Cardiology to isolate from rhythm-specific guidelines
+            "condition_tag": "General Cardiology",
             "question": q_clean,
             "answer": a_clean,
             "keywords": keywords,
@@ -160,7 +167,7 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "id": "beta_blocker_safety",
         "title": "Beta-Blocker Clinical Contraindications & Safety",
         "category": "Medications",
-        "condition_tag": "Normal Sinus Rhythm",
+        "condition_tag": "General Cardiology",
         "keywords": ["beta blocker", "metoprolol", "carvedilol", "contraindication", "asthma", "av block", "interaction"],
         "content": (
             "Beta-adrenoceptor antagonists (Metoprolol, Carvedilol, Bisoprolol) reduce myocardial oxygen demand and prevent "
@@ -179,7 +186,7 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "id": "heart_failure_gdmt",
         "title": "AHA/ACC Heart Failure Guideline-Directed Medical Therapy (GDMT)",
         "category": "Medications",
-        "condition_tag": "Normal Sinus Rhythm",
+        "condition_tag": "General Cardiology",
         "keywords": ["heart failure", "hfref", "gdmt", "entresto", "sglt2i", "spironolactone", "ejection fraction"],
         "content": (
             "Guideline-Directed Medical Therapy for HFrEF (LVEF <= 40%) consists of 4 foundational pharmacological pillars: "
@@ -198,7 +205,7 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "id": "dash_cardiovascular_nutrition",
         "title": "AHA/ACC DASH Diet & Electrolyte Protocols for Arrhythmia Prevention",
         "category": "Nutrition",
-        "condition_tag": "Normal Sinus Rhythm",
+        "condition_tag": "General Cardiology",
         "keywords": ["dash diet", "sodium", "salt", "potassium", "magnesium", "nutrition", "diet", "holiday heart"],
         "content": (
             "Evidence-based cardiovascular nutrition centers on the DASH (Dietary Approaches to Stop Hypertension) framework: "
@@ -217,7 +224,7 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "id": "exercise_cardiac_rehab",
         "title": "AHA Physical Activity Guidelines & Post-Arrhythmia Safe Resumption",
         "category": "Recovery",
-        "condition_tag": "Normal Sinus Rhythm",
+        "condition_tag": "General Cardiology",
         "keywords": ["exercise", "cardiac rehab", "target heart rate", "karvonen", "hrr", "heart rate recovery", "walking"],
         "content": (
             "AHA physical activity targets recommend >= 150 minutes/week of moderate-intensity aerobic exercise (brisk walking, "
@@ -236,7 +243,7 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "id": "circadian_sleep_apnea",
         "title": "Circadian Cardiology: Nocturnal Dipping & Obstructive Sleep Apnea",
         "category": "Recovery",
-        "condition_tag": "Normal Sinus Rhythm",
+        "condition_tag": "General Cardiology",
         "keywords": ["sleep", "apnea", "stop-bang", "cpap", "nocturnal dipping", "hrv", "vagal tone", "breathing"],
         "content": (
             "Healthy cardiovascular circadian rhythm features nocturnal blood pressure and heart rate dipping (10-20% drop "
@@ -246,6 +253,24 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
             "resonance breathing at 6 breaths/min stimulates vagal efferent activity and suppresses catecholaminergic ectopy."
         ),
         "safety_warning": "Untreated severe sleep apnea is a major modifiable cause of recurrent AFib and refractory hypertension."
+    },
+    # -------------------------------------------------------------------------
+    # 10. NORMAL SINUS RHYTHM & CARDIOVASCULAR HEALTH MONITORING
+    # -------------------------------------------------------------------------
+    {
+        "id": "normal_sinus_monitoring",
+        "title": "Normal Sinus Rhythm: Physiological Characteristics & Maintenance",
+        "category": "Physiology",
+        "condition_tag": "Normal Sinus Rhythm",
+        "keywords": ["normal sinus", "sinus rhythm", "healthy heart rate", "72 bpm", "baseline", "resting heart rate", "euvolemic"],
+        "content": (
+            "Normal Sinus Rhythm is the standard physiological cardiac rhythm originating from the sinoatrial (SA) node "
+            "at a resting rate between 60 and 100 beats per minute (typically 60-80 bpm at rest). The waveform displays regular "
+            "P-waves preceding each narrow QRS complex with consistent pulse transit times and normal heart rate variability (HRV). "
+            "Cardiovascular health maintenance recommendations: preserve resting heart rate via regular aerobic exercise (150 min/week), "
+            "adherence to Mediterranean or DASH dietary patterns, maintaining blood pressure < 120/80 mmHg, and 7-9 hours of restorative sleep."
+        ),
+        "safety_warning": "Routine resting rates persistently > 100 bpm or < 50 bpm outside of trained athletes should be clinically evaluated."
     },
 ]
 
@@ -306,8 +331,31 @@ class ClinicalRAG:
         """
         Retrieves the top-k most clinically relevant guidelines for a given user query
         and optional active cardiac condition.
+
+        Telemetry Isolation & Cross-Condition Inversion Defense:
+          - Queries asking to interpret an active sensor recording (e.g. 'What does my reading show?')
+            often lack specific arrhythmia keyword tokens in the user's message.
+          - To prevent generic TF-IDF matching from retrieving unrelated guidelines
+            (e.g., retrieving Bradycardia documents when the active rhythm is Tachycardia),
+            the engine detects telemetry inquiry intent (`is_telemetry_inquiry`).
+          - For telemetry inquiries:
+            * Matching condition guidelines receive a +30.0 boost (ensuring the correct guideline ranks #1).
+            * Conflicting condition guidelines receive a -10.0 penalty (preventing cross-rhythm contamination).
         """
+        query_clean = query.lower()
         query_tokens = self._tokenize(query)
+
+        # Detect generic sensor telemetry interpretation queries
+        is_telemetry_inquiry = any(
+            phrase in query_clean
+            for phrase in [
+                "my reading", "my ecg", "my ppg", "reading indicate", "reading show",
+                "interpret my", "my rhythm", "my signal", "my heart rate", "current signal",
+                "detected", "what is this", "what do these results", "analyze my",
+                "my diagnosis", "reading mean"
+            ]
+        )
+
         if not query_tokens and not condition:
             return self.guidelines[:top_k]
 
@@ -317,6 +365,7 @@ class ClinicalRAG:
         for idx, doc in enumerate(self.guidelines):
             score = 0.0
             doc_tokens = self.doc_tokens[idx]
+            doc_cond = doc.get("condition_tag", "").lower()
 
             # 1. Term frequency - Inverse document frequency matching
             for qt in query_tokens:
@@ -327,13 +376,31 @@ class ClinicalRAG:
                     else:
                         score += 1.0 * self.idf.get(qt, 1.0)
 
-            # 2. Condition boost (e.g. if active mobile sensor condition matches guideline tag)
-            if condition:
-                doc_cond = doc.get("condition_tag", "").lower()
-                if doc_cond and (doc_cond in cond_lower or cond_lower in doc_cond):
-                    score += 5.0
-                elif any(qt in cond_lower for qt in doc_tokens):
-                    score += 2.0
+            # 2. Priority boost for foundational ACC/AHA & ESC guidelines over 1-line Q&As
+            if score > 0.0 and not doc.get("id", "").startswith("cardiac_qa_"):
+                score += 20.0
+
+            # 3. Condition boost
+            if condition and doc_cond:
+                # Direct match between doc condition and active condition
+                is_condition_match = (
+                    (cond_lower in doc_cond or doc_cond in cond_lower)
+                    or ("tachy" in cond_lower and "tachy" in doc_cond)
+                    or ("brady" in cond_lower and "brady" in doc_cond)
+                    or ("afib" in cond_lower and ("afib" in doc_cond or "atrial" in doc_cond))
+                    or ("pvc" in cond_lower and "pvc" in doc_cond)
+                    or ("normal" in cond_lower and "normal" in doc_cond)
+                )
+
+                if is_condition_match:
+                    # If the user is specifically asking about their reading/results, strongly anchor to the condition guideline
+                    if is_telemetry_inquiry:
+                        score += 30.0
+                    else:
+                        score += 12.0
+                elif is_telemetry_inquiry:
+                    # Penalize non-matching condition documents for generic telemetry queries to avoid confusion
+                    score -= 10.0
 
             scores.append((score, idx))
 
@@ -356,16 +423,23 @@ class ClinicalRAG:
         max_tokens_approx: int = 180,
     ) -> str:
         """
-        Formats retrieved guideline context as a prompt injection prefix for the student LLM.
+        Formats retrieved guideline context as clean clinical evidence for the student LLM.
+        Strips 'Question: ... Answer:' completion-trigger artifacts to prevent premature disclaimer generation.
         """
         top_docs = self.retrieve(query=query, condition=condition, top_k=1)
         if not top_docs or top_docs[0]["retrieval_score"] <= 0.0:
             return ""
 
         doc = top_docs[0]
+        evidence_text = doc.get("answer", doc["content"])
+        if "\nAnswer:" in evidence_text:
+            evidence_text = evidence_text.split("\nAnswer:", 1)[1].strip()
+        elif evidence_text.startswith("Question:") and "Answer:" in evidence_text:
+            evidence_text = evidence_text.split("Answer:", 1)[1].strip()
+
         context = (
             f"\n[CLINICAL GUIDELINE GROUNDING - {doc['title']}]:\n"
-            f"{doc['content']}\n"
+            f"{evidence_text}\n"
         )
         if doc.get("safety_warning"):
             context += f"⚠️ Safety Note: {doc['safety_warning']}\n"

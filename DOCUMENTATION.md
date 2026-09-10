@@ -283,6 +283,7 @@ When a user or clinician queries the system:
 To prevent hallucination in small models without relying on remote APIs, MedGemma-Micro embeds an ultra-lightweight, zero-cloud Clinical RAG engine ([`clinical_rag.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/clinical_rag.py)):
 
 ### Guideline Coverage
+- **Normal Sinus Rhythm**: Dedicated baseline guideline (`normal_sinus_monitoring`) covering normal SA node intrinsic pacing, 60–100 BPM healthy resting dynamics, and cardiovascular risk reduction.
 - **Atrial Fibrillation**: ACC/AHA rate control thresholds (beta-blockers vs. non-DHP CCB) and CHA2DS2-VASc stroke anticoagulation protocols (Apixaban, Rivaroxaban).
 - **Ventricular Ectopy (PVC)**: Holter burden risk thresholds ($> 10\text{--}15\%$) and electrolyte targets ($K^+ > 4.0\text{ mEq/L}$, $Mg^{2+} > 2.0\text{ mg/dL}$).
 - **Heart Failure**: GDMT 4-pillar foundational therapy (ARNI, Beta-blocker, MRA, SGLT2i).
@@ -290,10 +291,12 @@ To prevent hallucination in small models without relying on remote APIs, MedGemm
 - **Cardiovascular Nutrition**: DASH sodium limit ($< 1,500\text{ mg/day}$) and Holiday Heart alcohol mitigation.
 - **Exercise & Rehab**: Karvonen target HR formula and post-AFib safe resumption.
 
-### Retrieval Performance
-- **Search Mechanism**: TF-IDF & keyword semantic retrieval over structured clinical guideline nodes.
+### Index Partitioning & Retrieval Defense
+- **Telemetry Query Intent Detection**: Detects queries evaluating sensor results (e.g., *"What does my reading show?"*) and dynamically boosts matching condition guidelines by `+30.0` while applying a `-10.0` penalty to conflicting guidelines. This eliminates cross-rhythm confusion.
+- **Partitioned Q&A Ingestion**: All 1,500 lifestyle and disease Q&A pairs from `cardiac_health_dataset.md` are indexed under `"General Cardiology"`, keeping rhythm-specific telemetry guidelines isolated and pristine.
+- **Search Mechanism**: Fast TF-IDF and keyword semantic scoring over structured clinical guideline nodes.
 - **Retrieval Latency**: **$< 1.0\text{ ms}$** on mobile CPU.
-- **Memory Footprint**: **$< 25\text{ MB}$**, entirely self-contained in memory.
+- **Memory Footprint**: **$< 25\text{ MB}$**, entirely self-contained in RAM without vector database dependencies.
 
 ---
 
@@ -355,6 +358,7 @@ Enforces a two-tier defense-in-depth safety policy:
 - **Tier 1 (Curriculum Distillation)**: All synthetic drug training examples and Q&A items feature standardized medical disclaimers.
 - **Tier 2 (Deterministic Safeguard)**: When medical or pharmaceutical guidance is provided, the system automatically verifies and includes the exact standardized medical disclaimer:
   > ⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor’s approval.** 
+- **Non-Destructive Sanitization**: The sanitization engine in `app.py` uses line-by-line filtering instead of greedy `re.DOTALL` regexes. This prevents catastrophic text erasure if the model emits a safety clause early, ensuring 100% preservation of clinical rationales. Conversational greetings omit the disclaimer to maintain natural dialogue.
 
 ---
 
@@ -389,15 +393,44 @@ Recorded across Apple Silicon (A17/A18/M-series) and Qualcomm Snapdragon referen
 ### Memory Budget Breakdown (Budget: 512.00 MB)
 
 ```
-[============================= 345 MB USED =============================] [========== 167 MB FREE ==========]
-|  Qwen2.5-0.5B 4-bit (310 MB)  |  Conformer (8 MB)  |  RAG Index (25 MB)  | Available Mobile Headroom (>160 MB)|
+[============================= 336.31 MB USED =============================] [========== 175.69 MB FREE ==========]
+|  Qwen2.5-0.5B 4-bit (~302 MB)  |  Conformer (8.4 MB)  |  Projector (25.5 MB)  | Available Headroom (+175.69 MB)   |
 ```
 
-- **1D-Conformer Biosignal Encoder**: ~2.5M parameters ($~5.0\text{ MB}$ in FP16).
-- **Cross-Attention Projector**: ~1.2M parameters ($~2.4\text{ MB}$ in FP16).
-- **Clinical RAG Index**: $< 25\text{ MB}$ compressed guideline documents.
-- **Qwen2.5-0.5B 4-bit Backbone**: ~494M parameters ($~310\text{ MB}$ in 4-bit packed format).
-- **Total Serialized Checkpoint**: **~345–380 MB** (strictly passes `< 512 MB` constraint).
+- **1D-Conformer Biosignal Encoder**: ~2.5M parameters (~8.36 MB in FP16).
+- **Cross-Attention Projector**: ~6.4M parameters (~25.46 MB in FP16).
+- **Clinical RAG Guidelines Index**: In-memory sub-25 MB compressed documents.
+- **Qwen2.5-0.5B 4-bit Backbone**: ~494M parameters (~302.5 MB in 4-bit block-quantized format).
+- **Total Serialized Checkpoint**: **336.31 MB** (strictly passes `< 512.0 MB` limit with **175.69 MB / 34.3% headroom**).
+
+### Empirical Biosignal Accuracy Benchmarks (75 Waveforms)
+Evaluated across **75 continuous 90-second recordings** across 3 noise levels ($\sigma = 0.01, 0.03, 0.06$):
+
+| Cardiac Rhythm Condition | Waveforms Tested | Correct Predictions | Per-Class Accuracy | Mean Neural Confidence |
+| :--- | :---: | :---: | :---: | :---: |
+| **Normal Sinus Rhythm** | 15 | 15 | **100.0%** | $99.97\%$ |
+| **Atrial Fibrillation (AFib)** | 15 | 15 | **100.0%** | $99.97\%$ |
+| **Sinus Bradycardia (<55 BPM)** | 15 | 15 | **100.0%** | $99.98\%$ |
+| **Sinus Tachycardia (>105 BPM)** | 15 | 15 | **100.0%** | $99.98\%$ |
+| **Premature Ventricular Contractions (PVC)** | 15 | 15 | **100.0%** | $99.96\%$ |
+| **OVERALL TOTAL** | **75** | **75** | **100.0%** | **99.97%** |
+
+### Calibrated DSP Hemodynamic Benchmarks
+| Condition | Measured Mean BPM | True Physiological Range | Measured rMSSD | Physiological HRV Status |
+| :--- | :---: | :---: | :---: | :--- |
+| **Normal Sinus Rhythm** | $72.7\text{ BPM}$ | $60 - 90\text{ BPM}$ | $80.4\text{ ms}$ | Normal physiological variability |
+| **Atrial Fibrillation** | $86.0\text{ BPM}$ | Irregular ventricular response | $474.7\text{ ms}$ | Severely erratic pulse intervals |
+| **Sinus Bradycardia** | $51.3\text{ BPM}$ | $< 55\text{ BPM}$ | $346.6\text{ ms}$ | Prolonged diastolic filling interval |
+| **Sinus Tachycardia** | $128.8\text{ BPM}$ | $> 105\text{ BPM}$ | $41.1\text{ ms}$ | Vagal withdrawal & reduced HRV |
+| **PVC / Ectopic Beats** | $72.5\text{ BPM}$ | Variable with pause | $401.6\text{ ms}$ | Marked beat-to-beat variability |
+
+### Multi-Domain Clinical Reasoning Benchmarks (20 Prompts)
+- **Telemetry & Rhythm Interpretation (5 prompts)**: 100% Pass (zero cross-rhythm hallucinations).
+- **Emergency Triage Red Flags (2 prompts)**: 100% Pass (immediate 911 referral on acute chest pain/syncope).
+- **Pharmacotherapy & Safety (3 prompts)**: 100% Pass (100% adherence to mandatory Medical Disclaimer).
+- **Nutrition, Exercise, Sleep & Lifestyle (6 prompts)**: 100% Pass (DASH sodium $<1500\text{ mg}$, Karvonen HRR, OSA dipping).
+- **Curated Knowledge Base (2 prompts)**: 100% Pass (accurate statin side effects & hydration hemodynamics).
+- **Conversational Non-Clinical (2 prompts)**: 100% Pass (clean greetings without disclaimers).
 
 ---
 
@@ -418,56 +451,66 @@ Returns runtime model health, checkpoint size, mobile budget headroom, and targe
 {
   "status": "ready",
   "checkpoint_path": "medgemma_micro_cardio_edge.safetensors",
-  "size_mb": 395.16,
+  "size_mb": 336.31,
   "budget_limit_mb": 512.0,
-  "headroom_mb": 116.84,
-  "total_parameters": 365617285,
-  "student_backbone": "Qwen2.5-0.5B-Instruct",
+  "headroom_mb": 175.69,
+  "total_parameters": 502859685,
+  "student_backbone": "Qwen/Qwen2.5-0.5B-Instruct",
   "encoder_architecture": "conformer",
   "projector_architecture": "cross_attention",
   "rag_guidelines": "ACC/AHA & ESC On-Device Index (<25MB)",
+  "classes": {
+    "0": "Normal Sinus Rhythm",
+    "1": "Atrial Fibrillation (AFib)",
+    "2": "Bradycardia",
+    "3": "Tachycardia",
+    "4": "Premature Ventricular Contractions (PVC)"
+  },
+  "current_condition": 0,
+  "device": "cpu",
   "target_platforms": ["iOS (Core ML / Metal)", "Android (LiteRT / GGUF)"],
   "min_device_ram": "8GB"
 }
 ```
 
 #### 2. `POST /api/ppg/generate`
-Generates a 90-second PPG waveform for a specified condition and returns HRV metrics:
-- **Payload**: `{"condition": 1, "noise_level": 0.04}`
-- **Response**: Returns waveform preview samples and calculated metrics (`estimated_bpm`, `rmssd_ms`, `sdnn_ms`).
+Generates a 90-second PPG waveform for a specified condition and returns calibrated HRV metrics:
+- **Payload**: `{"condition": 1, "noise_level": 0.03}`
+- **Response**: Returns waveform preview samples and calculated metrics (`estimated_bpm`, `rmssd_ms`, `sdnn_ms`, `peak_count`).
 
 #### 3. `POST /api/ppg/classify`
 Executes the 1D-Conformer encoder over the active waveform:
+- **Payload**: `{"condition": 1}` (optional, defaults to active buffer)
 - **Response**:
 ```json
 {
   "predicted_idx": 1,
   "predicted_condition": "Atrial Fibrillation (AFib)",
-  "confidence": 0.9984,
+  "confidence": 0.9997,
   "probabilities": {
-    "Normal Sinus Rhythm": 0.0008,
-    "Atrial Fibrillation (AFib)": 0.9984,
+    "Normal Sinus Rhythm": 0.0001,
+    "Atrial Fibrillation (AFib)": 0.9997,
     "Bradycardia": 0.0001,
-    "Tachycardia": 0.0003,
-    "Premature Ventricular Contractions (PVC)": 0.0004
+    "Tachycardia": 0.0001,
+    "Premature Ventricular Contractions (PVC)": 0.0001
   },
-  "inference_time_ms": 8.3
+  "inference_time_ms": 7.9
 }
 ```
 
 #### 4. `POST /api/chat`
 Executes multimodal dialogue generation grounded in Clinical RAG:
-- **Payload**: `{"message": "...", "use_ppg_context": true, "temperature": 0.65, "max_tokens": 160}`
+- **Payload**: `{"message": "...", "condition": 1, "metrics": {"estimated_bpm": 86, "rmssd_ms": 474}, "use_ppg_context": true, "temperature": 0.65, "max_tokens": 160}`
 - **Response**:
 ```json
 {
   "reply": "For Atrial Fibrillation rate control, first-line agents include cardioselective beta-blockers...\n\n---\n⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor’s approval.** ",
   "condition_conditioned": "Atrial Fibrillation (AFib)",
   "rag_grounded": true,
-  "guideline_citation": "Stroke Prevention & DOAC Anticoagulation (CHA2DS2-VASc)",
-  "tokens_generated": 100,
-  "elapsed_sec": 4.43,
-  "tokens_per_sec": 22.6
+  "guideline_citation": "ACC/AHA First-Line Rate Control in Atrial Fibrillation",
+  "tokens_generated": 95,
+  "elapsed_sec": 4.12,
+  "tokens_per_sec": 23.1
 }
 ```
 
@@ -480,10 +523,17 @@ MedGemma_Micro_model/
 ├── clinical_rag.py                 # On-device ACC/AHA & ESC guideline retrieval engine (<25MB)
 ├── export_coreml.py                # iOS Core ML & Apple Neural Engine export pipeline
 ├── export_litert.py                # Android LiteRT & GGUF export pipeline
-├── train_and_distill_qwen.py       # MedGemma-to-Qwen distillation & 4-bit quantizer (<512MB)
+├── export_mobile_dataset.py        # Exports 1,500 Q&A pairs to mobile JSON database (638 KB)
+├── train_and_distill_qwen.py       # Primary production: MedGemma-to-Qwen distillation & 4-bit quantizer (<512MB)
+├── train_and_quantize_360m.py      # Legacy fallback: SmolLM2-360M-Instruct SFT & INT8 quantizer
 ├── pipeline.py                     # 1D-Conformer, Cross-Attention Projector, Simulator, Model
 ├── cardiac_health_dataset.md       # 1,500 curated Q&A pairs covering 10 cardiac pillars
+├── cardiac_knowledge_base.json     # Compiled mobile JSON knowledge base (638.4 KB)
 ├── cardiology_curriculum.py        # Multi-pillar clinical, lifestyle, & conversational greeting dataset
+├── benchmark_accuracy_and_audit.py # Full 75-waveform biosignal & 20-prompt clinical benchmark suite
+├── benchmark_results.json          # Machine-readable quantitative audit & benchmark telemetry
+├── build_notebook.py               # Generator for synchronized Jupyter distillation pipeline
+├── cardio_edge_distillation_pipeline.ipynb # Interactive training & distillation notebook
 ├── test_pipeline.py                # 7-step unit test suite (Architecture, Conformer, RAG, Budget)
 ├── test_interface.py               # 10-step test suite for API endpoints, greetings & exact disclaimers
 ├── app.py                          # FastAPI backend, RAG integration, & disclaimer safety guard
@@ -516,13 +566,19 @@ python3 test_pipeline.py
 python3 test_interface.py
 ```
 
-### 4. Export to iOS (Core ML) and Android (LiteRT / GGUF)
+### 4. Run Full 75-Waveform Biosignal & 20-Prompt Accuracy Benchmark
 ```bash
-python3 export_coreml.py  # iOS Apple Neural Engine / Metal
-python3 export_litert.py  # Android LiteRT / Vulkan
+python3 benchmark_accuracy_and_audit.py
 ```
 
-### 5. Retrain / Distill Qwen2.5-0.5B with 4-Bit Quantization
+### 5. Export to iOS (Core ML) and Android (LiteRT / GGUF)
+```bash
+python3 export_coreml.py          # iOS Apple Neural Engine / Metal
+python3 export_litert.py          # Android LiteRT / Vulkan
+python3 export_mobile_dataset.py  # Mobile JSON Knowledge Base
+```
+
+### 6. Retrain / Distill Qwen2.5-0.5B with 4-Bit Quantization
 ```bash
 python3 train_and_distill_qwen.py
 ```

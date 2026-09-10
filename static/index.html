@@ -177,8 +177,11 @@
             <span class="panel-caption">Distilled from MedGemma-1.5-4B-IT onto Qwen2.5-0.5B (4-bit)</span>
           </div>
 
-          <!-- Multimodal Soft Prefix Switch -->
+          <!-- Multimodal Soft Prefix Switch & History Clear -->
           <div class="multimodal-switch-container">
+            <button class="btn btn-outline btn-sm" id="btn-clear-chat" title="Clear conversation history">
+              <span>🧹</span> Clear Chat
+            </button>
             <label class="toggle-switch-label" title="Condition LM directly on 90s PPG sensor soft prompt embeddings">
               <input type="checkbox" id="toggle-multimodal">
               <span class="switch-slider"></span>
