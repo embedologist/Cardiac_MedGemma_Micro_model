@@ -1,11 +1,15 @@
 """
-Training & INT8 Quantization Script for MedGemma-Micro-360M (Legacy Backbone)
-=============================================================================
+Training & INT8 Quantization Script for MedGemma-Micro-360M (Legacy Backbone Fallback)
+====================================================================================
+NOTE: This is a legacy fallback script for the SmolLM2-360M architecture.
+For the active production pipeline (1D-Conformer + Cross-Attention + Qwen2.5-0.5B 4-bit),
+see: `train_and_distill_qwen.py`.
+
 Executes:
   1. Fine-tuning SmolLM2-360M-Instruct on Full-Spectrum Cardiology Curriculum.
-  2. Training / adapting PPGToLLMProjector to 960-dim embedding space.
-  3. Packaging unified model into .safetensors with INT8 per-channel quantization.
-  4. Strictly asserting file size < 512 MB (Target: ~390 MB).
+  2. Adapting PPGToLLMProjector to 960-dim embedding space with 1D-CNN encoder.
+  3. Packaging model into `medgemma_micro_360m_legacy.safetensors` with INT8 quantization.
+  4. Preserving the primary production checkpoint (`medgemma_micro_cardio_edge.safetensors`).
 """
 
 import os
@@ -27,7 +31,7 @@ from pipeline import (
 )
 
 STUDENT_ID = "HuggingFaceTB/SmolLM2-360M-Instruct"
-OUTPUT_PATH = "medgemma_micro_cardio_edge.safetensors"
+OUTPUT_PATH = "medgemma_micro_360m_legacy.safetensors"
 PREV_CHECKPOINT = "medgemma_micro_cardio_edge.safetensors"
 
 
@@ -121,6 +125,8 @@ def main():
         encoder_in_channels=1,
         encoder_classes=5,
         num_prefix_tokens=4,
+        encoder_type="cnn",
+        projector_type="mlp",
     )
     # Reinitialize projector bridge for 960 dimension
     model.ppg_projector = PPGToLLMProjector(sensor_dim=256, llm_dim=llm_dim, num_prefix_tokens=4)
