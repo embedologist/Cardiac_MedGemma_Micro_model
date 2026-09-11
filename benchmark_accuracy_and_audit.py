@@ -438,7 +438,13 @@ def run_full_benchmark():
         },
     }
 
-    with open("benchmark_results.json", "w", encoding="utf-8") as f:
+    out_path = "benchmark_results.json"
+    if os.path.exists(out_path):
+        try:
+            os.remove(out_path)
+        except Exception:
+            pass
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(report_data, f, indent=2)
     print("Exported full benchmark log to 'benchmark_results.json'.")
 

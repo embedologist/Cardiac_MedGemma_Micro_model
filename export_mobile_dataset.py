@@ -32,9 +32,14 @@ EXACT_DISCLAIMER = (
 
 
 def export_json():
+    global DATASET_MD, OUTPUT_JSON
     if not os.path.exists(DATASET_MD):
-        print(f"Error: {DATASET_MD} not found.")
-        return
+        alt_path = os.path.join(os.path.dirname(__file__), DATASET_MD)
+        if os.path.exists(alt_path):
+            DATASET_MD = alt_path
+        else:
+            print(f"Error: {DATASET_MD} not found.")
+            return
 
     with open(DATASET_MD, "r", encoding="utf-8") as f:
         text = f.read()
@@ -72,6 +77,9 @@ def export_json():
         "disclaimer": EXACT_DISCLAIMER,
         "items": records,
     }
+
+    if os.path.exists(OUTPUT_JSON):
+        os.remove(OUTPUT_JSON)
 
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)

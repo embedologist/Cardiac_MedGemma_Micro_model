@@ -892,3 +892,164 @@ input:checked + .switch-slider::before {
     min-height: 480px;
   }
 }
+
+/* =====================================================================
+   Wear OS Smartwatch Ingestion Bench Styles
+   ===================================================================== */
+.wearos-bench-card {
+  background: linear-gradient(135deg, rgba(13, 24, 48, 0.6) 0%, rgba(10, 18, 32, 0.75) 100%);
+  border: 1px solid rgba(0, 240, 255, 0.15);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  transition: var(--transition-smooth);
+}
+
+.wearos-bench-card:hover {
+  border-color: rgba(0, 240, 255, 0.3);
+}
+
+.wearos-bench-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wearos-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wearos-icon {
+  font-size: 1.3rem;
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wearos-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: block;
+}
+
+.wearos-sub {
+  font-size: 0.67rem;
+  color: var(--text-muted);
+  display: block;
+}
+
+.wearos-sqi-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent-emerald);
+}
+
+.wearos-sqi-badge.warning {
+  background: rgba(255, 71, 87, 0.12);
+  border-color: rgba(255, 71, 87, 0.3);
+  color: var(--accent-crimson);
+}
+
+.sqi-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.wearos-buffer-bar-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wearos-buffer-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.71rem;
+  color: var(--text-secondary);
+}
+
+.wearos-progress-track {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.wearos-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-emerald));
+  border-radius: 999px;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 8px var(--accent-cyan-glow);
+}
+
+.wearos-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wearos-row-label {
+  font-size: 0.71rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.wearos-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.wearos-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 4px 9px;
+  font-size: 0.71rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.wearos-btn:hover {
+  background: rgba(0, 240, 255, 0.1);
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.wearos-btn.active {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 10px var(--accent-cyan-glow);
+}
