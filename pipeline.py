@@ -23,7 +23,7 @@ import time
 import json
 import logging
 import argparse
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Union, Any
 
 import torch
 import torch.nn as nn
@@ -39,6 +39,15 @@ from transformers import (
     BitsAndBytesConfig,
     PreTrainedModel,
     PreTrainedTokenizer,
+)
+
+# Wear OS smartwatch integration
+from wearos_ppg_adapter import (
+    WearOSPPGPoint,
+    WearOSPacketProtocol,
+    WearOSPPGAdapter,
+    WearOSStreamBuffer,
+    WearOSSignalQuality,
 )
 
 # Configure logging
@@ -933,6 +942,45 @@ class MedGemmaMicroModel(nn.Module):
 
         return outputs
 
+    def classify_wearos_window(
+        self,
+        points: List[WearOSPPGPoint],
+        device: str = "cpu",
+    ) -> Dict[str, Union[int, str, float, Dict, bool]]:
+        """
+        Directly classifies a 90s window of raw Wear OS (Samsung Galaxy Watch 4) telemetry.
+        Runs DSP conditioning, checks contact validity/SQI, and executes 1D-Conformer.
+        """
+        adapter = WearOSPPGAdapter(target_fs=25)
+        conditioned_sig, quality = adapter.process_raw_window(points)
+
+        if not quality.get("is_usable", False):
+            return {
+                "success": False,
+                "error": f"Poor signal quality: {quality.get('quality_flag', 'UNKNOWN')}",
+                "quality": quality,
+                "predicted_condition": "Signal Rejected (Off-Wrist / High Motion)",
+            }
+
+        tensor_in = torch.tensor(conditioned_sig, dtype=torch.float32).unsqueeze(0).to(device)
+        with torch.no_grad():
+            logits, latent = self.ppg_encoder(tensor_in)
+            probs = torch.softmax(logits, dim=-1)[0]
+            pred_idx = int(torch.argmax(probs).item())
+
+        return {
+            "success": True,
+            "predicted_idx": pred_idx,
+            "predicted_condition": PPGSimulator.CLASSES.get(pred_idx, "Unknown"),
+            "confidence": round(float(probs[pred_idx].item()), 4),
+            "probabilities": {
+                PPGSimulator.CLASSES[i]: round(float(probs[i].item()), 4)
+                for i in range(len(PPGSimulator.CLASSES))
+            },
+            "quality": quality,
+            "conditioned_waveform": conditioned_sig.flatten().tolist()[:300],  # preview
+        }
+
 
 # =====================================================================
 # 7. TRAINING & DISTILLATION PIPELINE
@@ -1098,6 +1146,8 @@ def export_and_verify_checkpoint(
         "export_format": "safetensors",
         "precision": str(target_dtype),
     }
+    if os.path.exists(output_path):
+        os.remove(output_path)
     safetensors.torch.save_file(compact_state_dict, output_path, metadata=metadata)
 
     # Strict size verification check

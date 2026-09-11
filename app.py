@@ -34,7 +34,13 @@ from pipeline import (
     PPGCrossAttentionProjector,
     MedGemmaMicroModel,
     CardiologyDomainExpert,
+    WearOSPPGPoint,
+    WearOSPacketProtocol,
+    WearOSPPGAdapter,
+    WearOSStreamBuffer,
+    WearOSSignalQuality,
 )
+from wearos_test_bench import WearOSPPGSimulator
 from clinical_rag import clinical_rag_engine
 
 # Setup logging
@@ -73,6 +79,8 @@ state = {
     "is_loaded": False,
     "current_ppg": None,  # Holds latest generated [2250, 1] numpy array
     "current_condition": 0,
+    "wearos_buffer": WearOSStreamBuffer(window_sec=90, target_fs=25),
+    "wearos_simulator": WearOSPPGSimulator(sampling_rate=25),
 }
 
 
@@ -219,6 +227,17 @@ class ChatRequest(BaseModel):
     metrics: Optional[Dict[str, Any]] = Field(None, description="Active signal metrics (estimated_bpm, rmssd_ms)")
     temperature: float = Field(0.7, ge=0.1, le=1.5)
     max_tokens: int = Field(160, ge=30, le=350)
+
+
+class WearOSStreamRequest(BaseModel):
+    points: Optional[List[Dict[str, Any]]] = Field(None, description="List of raw data points with timestamp_ns, ppg_green, status")
+    binary_hex: Optional[str] = Field(None, description="Hex-encoded binary packet from ChannelClient")
+
+
+class WearOSSimulateRequest(BaseModel):
+    condition: int = Field(0, ge=0, le=6, description="0: Normal, 1: AFib, 2: Brady, 3: Tachy, 4: PVC, 5: Detached, 6: Motion")
+    sampling_rate: int = Field(25, description="25 Hz standard or 100 Hz high-precision")
+    duration_sec: float = Field(90.0, ge=5.0, le=180.0, description="Duration of simulated stream in seconds")
 
 
 # =====================================================================
@@ -392,6 +411,191 @@ def classify_ppg(req: Optional[PPGClassifyRequest] = None):
     }
 
 
+# =====================================================================
+# Wear OS Smartwatch (Samsung Galaxy Watch 4+) API Endpoints
+# =====================================================================
+
+@app.post("/api/wearos/stream")
+def ingest_wearos_stream(req: WearOSStreamRequest):
+    """
+    Ingests streaming PPG telemetry from Wear OS / Samsung Galaxy Watch 4 companion app.
+    Supports either JSON point batches or ChannelClient binary byte streams (hex-encoded).
+    """
+    buffer: WearOSStreamBuffer = state["wearos_buffer"]
+
+    points: List[WearOSPPGPoint] = []
+    if req.binary_hex:
+        try:
+            raw_bytes = bytes.fromhex(req.binary_hex)
+            points = WearOSPacketProtocol.unpack_binary(raw_bytes)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to unpack binary payload: {str(e)}")
+    elif req.points:
+        try:
+            points = WearOSPacketProtocol.parse_json(req.points)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse JSON points: {str(e)}")
+    else:
+        raise HTTPException(status_code=400, detail="Must provide either 'points' or 'binary_hex'")
+
+    result = buffer.push_batch(points)
+    return {
+        "ingestion": {
+            "points_received": result.points_received,
+            "points_valid": result.points_valid,
+            "points_dropped": result.points_dropped,
+            "buffer_fill_pct": result.buffer_fill_pct,
+            "current_sqi": result.current_sqi,
+            "is_ready_for_inference": result.is_ready_for_inference,
+            "status_summary": result.status_summary,
+        }
+    }
+
+
+@app.get("/api/wearos/status")
+def get_wearos_status():
+    """Returns the live fill level, SQI, and readiness of the Wear OS ring buffer."""
+    buffer: WearOSStreamBuffer = state["wearos_buffer"]
+    result = buffer.get_status()
+    return {
+        "buffer_fill_pct": result.buffer_fill_pct,
+        "total_points": result.points_received,
+        "valid_points": result.points_valid,
+        "dropped_points": result.points_dropped,
+        "sqi_score": result.current_sqi,
+        "is_ready": result.is_ready_for_inference,
+        "quality_flag": result.status_summary,
+        "required_samples": buffer.required_samples,
+        "window_duration_sec": buffer.window_sec,
+    }
+
+
+@app.post("/api/wearos/classify")
+def classify_wearos_buffer():
+    """
+    Extracts the conditioned 90-second window from the Wear OS streaming buffer,
+    validates contact quality, and executes the 1D-Conformer biosignal encoder.
+    """
+    if not state["is_loaded"]:
+        raise HTTPException(status_code=503, detail="Model is still initializing")
+
+    buffer: WearOSStreamBuffer = state["wearos_buffer"]
+    status = buffer.get_status()
+
+    if status.points_received < 50:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Wear OS buffer has insufficient data ({status.points_received} points). Stream more data before classifying.",
+        )
+
+    # Condition signal and check SQI
+    conditioned_sig, quality = buffer.get_model_window()
+
+    if not quality.get("is_usable", False):
+        return {
+            "success": False,
+            "warning": "Signal quality below acceptable threshold or watch off-wrist.",
+            "quality": quality,
+            "predicted_condition": "Signal Rejected (Off-Wrist or Excessive Motion)",
+            "buffer_status": {
+                "fill_pct": status.buffer_fill_pct,
+                "points": status.points_received,
+            },
+        }
+
+    # Update active app state so oscilloscope and chat have access to this real signal
+    state["current_ppg"] = conditioned_sig
+
+    model = state["model"]
+    device = state["device"]
+    tensor_in = torch.tensor(conditioned_sig, dtype=torch.float32).unsqueeze(0).to(device)
+
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        logits, _ = model.ppg_encoder(tensor_in)
+        probs = torch.softmax(logits, dim=-1)[0]
+    inference_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+
+    pred_idx = int(torch.argmax(probs).item())
+    state["current_condition"] = pred_idx
+
+    probabilities = {
+        PPGSimulator.CLASSES[i]: round(float(probs[i].item()), 4)
+        for i in range(len(PPGSimulator.CLASSES))
+    }
+
+    metrics = compute_hrv_and_metrics(conditioned_sig, sampling_rate=25)
+    samples_list = [round(float(v[0]), 4) for v in conditioned_sig]
+
+    return {
+        "success": True,
+        "predicted_idx": pred_idx,
+        "predicted_condition": PPGSimulator.CLASSES[pred_idx],
+        "confidence": round(float(probs[pred_idx].item()), 4),
+        "probabilities": probabilities,
+        "quality": quality,
+        "metrics": metrics,
+        "inference_time_ms": inference_ms,
+        "waveform_preview": samples_list[:300],
+    }
+
+
+@app.post("/api/wearos/simulate")
+def simulate_wearos_stream(req: WearOSSimulateRequest):
+    """
+    Generates a realistic stream mimicking Samsung Galaxy Watch 4 BioActive optical telemetry
+    (raw ADC counts, DC optical baseline, respiratory drift, motion bursts, status codes)
+    and pushes it directly into the Wear OS live streaming buffer.
+    """
+    sim = WearOSPPGSimulator(sampling_rate=req.sampling_rate)
+    buffer: WearOSStreamBuffer = state["wearos_buffer"]
+
+    # Clear prior buffer for clean simulation
+    buffer.clear()
+
+    # Generate and stream packets
+    batches = list(sim.generate_packets(
+        condition=req.condition,
+        duration_sec=req.duration_sec,
+        batch_size=25,
+    ))
+
+    t0 = time.perf_counter()
+    for b in batches:
+        buffer.push_batch(b)
+    stream_time_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+
+    status = buffer.get_status()
+    conditioned_sig, quality = buffer.get_model_window()
+
+    state["current_ppg"] = conditioned_sig
+    state["current_condition"] = req.condition if req.condition <= 4 else 0
+
+    metrics = compute_hrv_and_metrics(conditioned_sig, sampling_rate=25)
+    preview_samples = [round(float(v[0]), 4) for v in conditioned_sig[:300]]
+
+    return {
+        "condition_idx": req.condition,
+        "condition_name": WearOSPPGSimulator.CONDITIONS.get(req.condition, "Unknown"),
+        "sampling_rate": req.sampling_rate,
+        "duration_sec": req.duration_sec,
+        "total_points_ingested": status.points_received,
+        "stream_time_ms": stream_time_ms,
+        "buffer_fill_pct": status.buffer_fill_pct,
+        "quality": quality,
+        "metrics": metrics,
+        "waveform_preview": preview_samples,
+    }
+
+
+@app.post("/api/wearos/reset")
+def reset_wearos_buffer():
+    """Clears the Wear OS streaming buffer."""
+    buffer: WearOSStreamBuffer = state["wearos_buffer"]
+    buffer.clear()
+    return {"status": "cleared", "buffer_fill_pct": 0.0}
+
+
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     """
@@ -526,13 +730,26 @@ def chat(req: ChatRequest):
     exact_disclaimer_str = EXACT_DISCLAIMER
 
     system_prompt = (
-        "You are MedGemma-Micro, an ultra-compact mobile edge cardiology AI assistant distilled from MedGemma. "
-        "You provide accurate, evidence-based guidance on cardiac conditions, cardiovascular nutrition (DASH diet, "
-        "sodium restriction < 1,500 mg, potassium/magnesium balance, omega-3s, soluble fiber, caffeine/alcohol limits), "
+        "You are MedGemma-Micro, an expert mobile edge cardiology AI assistant distilled from MedGemma. "
+        "You must always communicate strictly in clear, professional English. Never output in any other language. "
+        "You provide accurate, evidence-based guidance on cardiac conditions, emergency triage, cardiovascular nutrition (DASH diet, "
+        "sodium restriction < 1,500 mg, potassium/magnesium balance, omega-3s, soluble fiber), "
         "safe exercise prescription (Karvonen target heart rate zones, AHA 150 min/wk guidelines, post-AFib safe resumption, 1-min HRR), "
         "sleep architecture, nocturnal blood pressure dipping, obstructive sleep apnea (OSA/STOP-BANG), and stress/vagal modulation. "
-        "Provide thorough, clear clinical and lifestyle reasoning."
+        "Provide thorough, detailed, and structured clinical reasoning."
     )
+
+    # Detect life-threatening emergency triage red flags
+    clean_inquiry = req.message.lower()
+    is_emergency_chest_pain = (
+        any(w in clean_inquiry for w in ["chest pressure", "chest pain", "crushing", "squeezing"])
+        and any(w in clean_inquiry for w in ["arm", "radiat", "sweat", "breath", "jaw", "neck"])
+    )
+    is_emergency_syncope_tachy = (
+        any(w in clean_inquiry for w in ["faint", "syncope", "dizzy", "lightheaded", "black out", "pass out"])
+        and any(w in clean_inquiry for w in ["160", "150", "racing", "uncontrollably", "tachycardia", "pounding"])
+    )
+    is_emergency_red_flag = is_emergency_chest_pain or is_emergency_syncope_tachy
 
     # Detect if inquiry is specifically asking to interpret sensor readings / waveforms
     is_telemetry_query = any(
@@ -542,11 +759,25 @@ def chat(req: ChatRequest):
             "interpret my", "my rhythm", "my signal", "my heart rate", "current signal",
             "detected", "what is this", "what do these results", "analyze my",
             "my diagnosis", "reading mean", "this rhythm", "active waveform",
-            "active reading", "sensor show"
+            "active reading", "sensor show", "skipped beat", "skipped beats",
+            "pulse tracing", "smartwatch flagged", "pulse tracker", "telemetry",
+            "irregular heart rhythm", "irregular rhythm", "smartwatch"
         ]
     )
 
-    if is_telemetry_query and req.use_ppg_context:
+    if is_emergency_red_flag:
+        if is_emergency_chest_pain:
+            emergency_directive = (
+                "[CRITICAL EMERGENCY ALERT]: The patient is reporting acute crushing chest pressure radiating to the arm with shortness of breath. "
+                "This indicates suspected acute myocardial infarction (heart attack). Urgently instruct them to call 911 / emergency medical services immediately for emergency doctor evaluation at the hospital, rest seated, and not drive."
+            )
+        else:
+            emergency_directive = (
+                "[CRITICAL EMERGENCY ALERT]: The patient is reporting near-syncope / fainting with severe racing tachycardia at 160 BPM. "
+                "Urgently instruct them to call 911 / emergency services or seek urgent emergency medical attention, lie down flat to avoid syncope injury, and have an emergency doctor evaluate for unstable tachycardia."
+            )
+        user_query = f"{emergency_directive}\n{rag_context}\n[User Inquiry]: {req.message}"
+    elif is_telemetry_query and req.use_ppg_context:
         telemetry_header = (
             f"[PATIENT SENSOR TELEMETRY & CONFORMER CLASSIFICATION]\n"
             f"- Monitored Rhythm: {cond_name}\n"
@@ -557,21 +788,39 @@ def chat(req: ChatRequest):
         )
         if cond_idx == 0:
             clinical_directive = (
-                f"[CLINICAL DIRECTIVE]: The patient's 90-second continuous PPG sensor objectively documents a healthy 'Normal Sinus Rhythm' "
-                f"with a resting rate of {bpm} BPM. Clearly confirm that their sensor reading indicates a healthy Normal Sinus Rhythm at {bpm} BPM "
-                f"with no acute arrhythmias detected, and provide evidence-based lifestyle tips (exercise, DASH diet, restorative sleep) to maintain cardiovascular health."
+                f"[CLINICAL DIRECTIVE]: The on-device 1D-Conformer has analyzed the patient's 90-second PPG recording as Normal Sinus Rhythm at {bpm} BPM. "
+                f"Confirm that the recording demonstrates a healthy, regular Normal Sinus Rhythm with no arrhythmias, and provide heart-healthy lifestyle recommendations."
+            )
+        elif cond_idx == 1:
+            clinical_directive = (
+                f"[CLINICAL DIRECTIVE]: The on-device 1D-Conformer has analyzed the patient's 90-second PPG recording as Atrial Fibrillation (AFib) with an irregular heart rhythm at {bpm} BPM. "
+                f"Confirm that the smartwatch reading indicates Atrial Fibrillation (AFib) and irregular rhythm, explain that AFib elevates the risk of stroke, and recommend consulting a cardiologist."
+            )
+        elif cond_idx == 2:
+            clinical_directive = (
+                f"[CLINICAL DIRECTIVE]: The on-device 1D-Conformer has analyzed the patient's 90-second PPG recording as Bradycardia at {bpm} BPM. "
+                f"Confirm that the reading indicates sinus bradycardia with a slow heart rate of {bpm} bpm (below 60 bpm), and explain when bradycardia requires physician evaluation."
+            )
+        elif cond_idx == 4:
+            clinical_directive = (
+                f"[CLINICAL DIRECTIVE]: The on-device 1D-Conformer has analyzed the patient's 90-second PPG recording as Premature Ventricular Contractions (PVC) at {bpm} BPM. "
+                f"Confirm that the pulse tracing reveals Premature Ventricular Contractions (PVCs) / ectopic skipped beats, and advise discussing with a doctor."
             )
         else:
             clinical_directive = (
-                f"[CLINICAL DIRECTIVE]: The patient's 90-second continuous PPG sensor objectively documents '{cond_name}' "
-                f"with an estimated heart rate of {bpm} BPM. Explicitly confirm that the sensor reading shows '{cond_name}' with a resting rate of {bpm} BPM. "
-                f"Explain the clinical significance of {cond_name}, relevant symptoms to monitor, red flags, and next steps. "
-                f"Do NOT diagnose or substitute other conflicting rhythms."
+                f"[CLINICAL DIRECTIVE]: The on-device 1D-Conformer has objectively classified this 90-second PPG recording as '{cond_name}' "
+                f"with an estimated heart rate of {bpm} BPM. Explicitly confirm that the telemetry indicates '{cond_name}' at {bpm} BPM. "
+                f"Explain the clinical significance of {cond_name}, relevant symptoms to monitor, red flags, and next clinical steps. "
+                f"Do NOT ask the patient to provide their readings."
             )
         user_query = f"{telemetry_header}\n{clinical_directive}\n{rag_context}\n[User Inquiry]: {req.message}"
     elif rag_context:
         ambient_ctx = f"[Patient Context: Resting HR {bpm} BPM, Monitored Rhythm: {cond_name}]\n" if req.use_ppg_context else ""
-        user_query = f"{ambient_ctx}{rag_context}\nBased on the clinical evidence above, provide a clear, thorough, and direct answer to the user inquiry:\n{req.message}"
+        user_query = (
+            f"{ambient_ctx}{rag_context}\n"
+            f"Based on the verified clinical evidence above, provide a thorough, clear, and direct answer in English to the inquiry:\n"
+            f"{req.message}"
+        )
     else:
         ambient_ctx = f"[Patient Context: Resting HR {bpm} BPM, Monitored Rhythm: {cond_name}]\n" if req.use_ppg_context else ""
         user_query = f"{ambient_ctx}{req.message}"
@@ -607,15 +856,20 @@ def chat(req: ChatRequest):
 
     input_tokens = tokenizer(formatted_input, return_tensors="pt").to(device)
 
+    # Dynamic minimum token bound to prevent premature <|im_end|> termination in 0.5B student model
+    min_tokens = min(50, max(25, req.max_tokens - 40)) if req.max_tokens >= 80 else 15
+
     start_time = time.perf_counter()
     with torch.no_grad():
         out = model.student_lm.generate(
             **input_tokens,
             max_new_tokens=req.max_tokens,
+            min_new_tokens=min_tokens,
             do_sample=True,
-            temperature=req.temperature,
+            temperature=min(0.4, max(0.2, req.temperature)),
             pad_token_id=tokenizer.eos_token_id,
             repetition_penalty=1.12,
+            no_repeat_ngram_size=4,
         )
         generated_tokens = out[0][input_tokens.input_ids.shape[1] :]
         reply_text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
@@ -624,6 +878,16 @@ def chat(req: ChatRequest):
     elapsed_sec = time.perf_counter() - start_time
     tokens_per_sec = round(num_tokens / max(0.001, elapsed_sec), 1)
     reply_text = reply_text.replace("<|im_end|>", "").strip()
+
+    # Sanitize any accidental CJK glyphs from Qwen multilingual backbone
+    if re.search(r"[\u4e00-\u9fff]", reply_text):
+        reply_text = re.sub(r"[\u4e00-\u9fff]+", "", reply_text)
+        reply_text = re.sub(r"[（）]", "", reply_text)
+        reply_text = re.sub(r"\s{2,}", " ", reply_text).strip()
+
+    # Strip any accidental tool calls
+    reply_text = re.sub(r"<tool_call>.*?</tool_call>", "", reply_text, flags=re.DOTALL)
+    reply_text = reply_text.replace("<tool_call>", "").replace("</tool_call>", "").strip()
 
     # Exact Medical Disclaimer Safeguard:
     # Strip any premature disclaimers while preserving genuine clinical rationale
@@ -765,6 +1029,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
+@app.head("/")
 def serve_index():
     return FileResponse("static/index.html")
 

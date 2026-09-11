@@ -28,7 +28,11 @@ def load_cardiac_health_dataset(file_path: str = "cardiac_health_dataset.md") ->
         (e.g., 'What does my reading show?') from inadvertently retrieving lifestyle items.
     """
     if not os.path.exists(file_path):
-        return []
+        alt_path = os.path.join(os.path.dirname(__file__), file_path)
+        if os.path.exists(alt_path):
+            file_path = alt_path
+        else:
+            return []
 
     try:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -110,7 +114,7 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "title": "AHA/ESC Management of Premature Ventricular Contractions",
         "category": "Arrhythmias",
         "condition_tag": "Premature Ventricular Contractions (PVC)",
-        "keywords": ["pvc", "premature ventricular", "skipped beat", "ectopic", "palpitations", "burden", "holter"],
+        "keywords": ["pvc", "premature ventricular", "skipped beat", "skipped beats", "pulse tracing", "ectopic", "palpitations", "burden", "holter"],
         "content": (
             "Isolated PVCs in an otherwise structurally normal heart carry a benign prognosis. Evaluation requires assessing "
             "PVC burden via 24-48h Holter monitoring. A burden > 10-15% of total beats increases long-term risk of "
@@ -206,13 +210,15 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "title": "AHA/ACC DASH Diet & Electrolyte Protocols for Arrhythmia Prevention",
         "category": "Nutrition",
         "condition_tag": "General Cardiology",
-        "keywords": ["dash diet", "sodium", "salt", "potassium", "magnesium", "nutrition", "diet", "holiday heart"],
+        "keywords": ["dash diet", "sodium", "salt", "potassium", "magnesium", "electrolyte", "deficiency", "arrhythmia", "nutrition", "diet", "holiday heart"],
         "content": (
-            "Evidence-based cardiovascular nutrition centers on the DASH (Dietary Approaches to Stop Hypertension) framework: "
-            "1) Restrict dietary sodium to strictly < 1,500-2,000 mg/day (roughly 3/4 tsp table salt) to lower systemic vascular "
-            "resistance and left ventricular wall stress. 2) Dietary Potassium: 3,500-4,700 mg/day from dark leafy greens, avocados, "
-            "and sweet potatoes (caution in advanced CKD). 3) Magnesium: 350-420 mg/day (nuts, seeds, legumes) to maintain "
-            "membrane stability and prevent ectopic triggers. 4) Strictly avoid binge alcohol intake ('Holiday Heart syndrome')."
+            "Cardiovascular electrolyte balance and DASH dietary protocols: "
+            "1) Potassium and Magnesium Electrolyte Role: Potassium (serum target 4.0-5.0 mEq/L) and Magnesium (target > 2.0 mg/dL) "
+            "are vital electrolytes maintaining myocardial resting membrane stability and electrical conduction. Deficiencies "
+            "(hypokalemia and hypomagnesemia) impair cardiac repolarization, destabilize cell membranes, and promote ectopic arrhythmias "
+            "(such as PVCs, palpitations, and AFib). 2) DASH Sodium Restriction: Limit sodium to strictly < 1,500-2,000 mg/day to "
+            "lower systemic vascular resistance and blood pressure. 3) Replenish dietary potassium (3,500-4,700 mg/day) and "
+            "magnesium (350-420 mg/day) using leafy greens, legumes, and nuts."
         ),
         "safety_warning": "Do not recommend potassium chloride salt substitutes without verifying renal function and concurrent meds."
     },
@@ -225,13 +231,13 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "title": "AHA Physical Activity Guidelines & Post-Arrhythmia Safe Resumption",
         "category": "Recovery",
         "condition_tag": "General Cardiology",
-        "keywords": ["exercise", "cardiac rehab", "target heart rate", "karvonen", "hrr", "heart rate recovery", "walking"],
+        "keywords": ["exercise", "cardiac rehab", "target heart rate", "karvonen", "heart rate reserve", "hrr", "heart rate recovery", "walking"],
         "content": (
-            "AHA physical activity targets recommend >= 150 minutes/week of moderate-intensity aerobic exercise (brisk walking, "
-            "cycling) or 75 minutes of vigorous exercise. For patients post-cardiac event or paroxysmal AFib termination: "
-            "1) Avoid high-intensity interval training (HIIT) or heavy isometric resistance for 24-48 hours. 2) Calculate Karvonen "
-            "Target Heart Rate: THR = ((HRmax - HRrest) * %Intensity) + HRrest, aiming for 50-70% intensity. 3) Monitor 1-minute "
-            "Heart Rate Recovery (HRR): a drop of < 12 bpm at 1 minute post-exercise indicates blunted parasympathetic reactivation."
+            "AHA physical activity targets recommend >= 150 minutes/week of moderate-intensity aerobic exercise. "
+            "Karvonen Formula and Heart Rate Reserve (HRR): Calculate Heart Rate Reserve (HRR) as maximum heart rate minus resting "
+            "heart rate (HRR = HRmax - HRrest). The Karvonen Target Heart Rate is calculated as: Target HR = (HRR * %Intensity) + HRrest, "
+            "aiming for 50-70% of heart rate reserve for safe cardiovascular training. Post-exercise, monitor 1-minute heart rate "
+            "recovery (HRR) to evaluate vagal parasympathetic reactivation."
         ),
         "safety_warning": "Stop exercise immediately if experiencing chest pain, dizziness, lightheadedness, or sudden palpitation bursts."
     },
@@ -244,15 +250,21 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "title": "Circadian Cardiology: Nocturnal Dipping & Obstructive Sleep Apnea",
         "category": "Recovery",
         "condition_tag": "General Cardiology",
-        "keywords": ["sleep", "apnea", "stop-bang", "cpap", "nocturnal dipping", "hrv", "vagal tone", "breathing"],
+        "keywords": [
+            "sleep", "apnea", "osa", "stop-bang", "cpap", "nocturnal dipping",
+            "hypoxia", "airway", "resistance", "breathing", "resonance", "diaphragmatic",
+            "autonomic", "parasympathetic", "heart rate", "hrv", "vagal tone", "epinephrine"
+        ],
         "content": (
-            "Healthy cardiovascular circadian rhythm features nocturnal blood pressure and heart rate dipping (10-20% drop "
-            "during non-REM sleep). Non-dipping or nocturnal surges indicate sympathetic hyperactivity and markedly increase stroke "
-            "and heart failure risk. Screen for Obstructive Sleep Apnea (OSA) using STOP-BANG in any patient with nocturnal arrhythmias "
-            "or resistant hypertension. CPAP adherence reduces AFib recurrence by over 40%. Autonomic regulation: diaphragmatic "
-            "resonance breathing at 6 breaths/min stimulates vagal efferent activity and suppresses catecholaminergic ectopy."
+            "Healthy cardiovascular circadian rhythm features nocturnal blood pressure and heart rate dipping (a normal 10-20% drop "
+            "during non-REM sleep). Non-dipping or nocturnal surges indicate autonomic dysfunction and sympathetic hyperactivity, "
+            "markedly increasing stroke and heart failure risk. Untreated Obstructive Sleep Apnea (OSA) causes repetitive upper airway "
+            "collapse, intermittent nocturnal hypoxia, severe negative intrathoracic pressure swings, and surges in sympathetic nervous system "
+            "catecholamines / epinephrine that acutely stretch atrial tissue and trigger AFib episodes. Screening with STOP-BANG and CPAP "
+            "adherence reduces AFib recurrence by over 40%. Autonomic regulation: slow-paced diaphragmatic resonance breathing at 6 breaths/minute "
+            "(4s inhale, 6s exhale) stimulates vagal efferent activity, enhances heart rate variability (HRV / rMSSD), and suppresses catecholaminergic ectopy."
         ),
-        "safety_warning": "Untreated severe sleep apnea is a major modifiable cause of recurrent AFib and refractory hypertension."
+        "safety_warning": "Untreated severe obstructive sleep apnea is a major modifiable trigger of recurrent AFib episodes and refractory hypertension."
     },
     # -------------------------------------------------------------------------
     # 10. NORMAL SINUS RHYTHM & CARDIOVASCULAR HEALTH MONITORING

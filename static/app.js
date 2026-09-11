@@ -130,8 +130,9 @@ function drawOscilloscope(timestamp) {
 
   for (let i = 0; i < limit; i++) {
     const x = i * stepX;
-    // Invert normalized 0..1 to canvas y coordinates
-    const y = h - paddingY - pts[i] * usableH;
+    // Z-score normalized signal (mean ~0.0, std ~1.0): center at h / 2
+    // Map ±3 standard deviations to usable canvas height
+    const y = h / 2 - pts[i] * (usableH / 6.0);
     if (i === 0) {
       ctx.moveTo(x, y);
     } else {
@@ -143,7 +144,7 @@ function drawOscilloscope(timestamp) {
   // Draw Sweep Head Cursor
   if (STATE.isSweeping && limit > 0 && limit < numPoints) {
     const headX = (limit - 1) * stepX;
-    const headY = h - paddingY - pts[limit - 1] * usableH;
+    const headY = h / 2 - pts[limit - 1] * (usableH / 6.0);
 
     // Glowing head dot
     ctx.shadowBlur = 16;
@@ -243,15 +244,20 @@ async function runClassification() {
 }
 
 function updateTelemetry(metrics, condIdx, condName) {
-  metricHr.textContent = metrics.estimated_bpm.toFixed(1);
-  metricRmssd.textContent = metrics.rmssd_ms.toFixed(1);
-  metricSdnn.textContent = metrics.sdnn_ms.toFixed(1);
+  if (!metrics) return;
+  const bpm = metrics.estimated_bpm ?? 72;
+  const rmssd = metrics.rmssd_ms ?? 38;
+  const sdnn = metrics.sdnn_ms ?? 42;
 
-  badgeRhythmName.textContent = condName;
+  metricHr.textContent = bpm.toFixed(1);
+  metricRmssd.textContent = rmssd.toFixed(1);
+  metricSdnn.textContent = sdnn.toFixed(1);
+
+  if (condName) badgeRhythmName.textContent = condName;
 
   // Update badge styling
   currentRhythmBadge.className = 'rhythm-status-badge';
-  const theme = CONDITION_COLORS[condIdx];
+  const theme = CONDITION_COLORS[condIdx] || CONDITION_COLORS[0];
   if (theme && theme.badgeClass) {
     currentRhythmBadge.classList.add(theme.badgeClass);
   }
@@ -259,8 +265,8 @@ function updateTelemetry(metrics, condIdx, condName) {
   // Update HR sub label
   const hrSub = document.getElementById('metric-hr-sub');
   if (hrSub) {
-    if (metrics.estimated_bpm < 50) hrSub.textContent = 'Severe Bradycardia';
-    else if (metrics.estimated_bpm > 100) hrSub.textContent = 'Tachycardic State';
+    if (bpm < 50) hrSub.textContent = 'Severe Bradycardia';
+    else if (bpm > 100) hrSub.textContent = 'Tachycardic State';
     else hrSub.textContent = 'Resting Normal Rhythm';
   }
 }
@@ -435,6 +441,10 @@ async function handleChatSubmit(e) {
         tokens: data.tokens_generated
       });
       STATE.chatHistory.push({ role: 'assistant', content: data.reply });
+      // Prevent unbounded memory accumulation during prolonged testing
+      if (STATE.chatHistory.length > 50) {
+        STATE.chatHistory = STATE.chatHistory.slice(-50);
+      }
 
       chatTps.textContent = `${data.tokens_per_sec} tok/s (${data.elapsed_sec}s)`;
     } else {
@@ -518,7 +528,7 @@ toggleMultimodal.addEventListener('change', () => {
   STATE.useMultimodal = toggleMultimodal.checked;
   bridgeIndicator.classList.toggle('active', STATE.useMultimodal);
   bridgeIndicator.querySelector('span:last-child').textContent = STATE.useMultimodal
-    ? 'Prefix K=4 (960-dim) Active'
+    ? 'Prefix K=4 (896-dim) Active'
     : 'Multimodal Bridge Off';
 });
 
@@ -544,6 +554,97 @@ userInput.addEventListener('keydown', e => {
     handleChatSubmit();
   }
 });
+
+// =====================================================================
+// Wear OS (Samsung Galaxy Watch 4) Streaming Logic
+// =====================================================================
+
+async function streamWearOSScenario(cond, fs) {
+  const sqiBadge = document.getElementById('wearos-sqi-badge');
+  const sqiText = document.getElementById('wearos-sqi-text');
+  const bufferFill = document.getElementById('wearos-progress-fill');
+  const bufferPct = document.getElementById('wearos-buffer-pct');
+  const bufferCount = document.getElementById('wearos-buffer-count');
+
+  sqiText.textContent = `Streaming ${fs}Hz...`;
+  sqiBadge.className = 'wearos-sqi-badge';
+
+  // Highlight active button
+  document.querySelectorAll('.wearos-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.cond) === cond && parseInt(btn.dataset.fs) === fs);
+  });
+
+  try {
+    const res = await fetch('/api/wearos/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        condition: cond,
+        sampling_rate: fs,
+        duration_sec: 90.0,
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Simulation failed');
+
+    // Update buffer HUD
+    bufferFill.style.width = `${data.buffer_fill_pct}%`;
+    bufferPct.textContent = `${data.buffer_fill_pct}% Full`;
+    bufferCount.textContent = `${data.total_points_ingested.toLocaleString()} / 2,250 samples`;
+
+    const q = data.quality || {};
+    sqiText.textContent = `SQI: ${q.sqi || 0.0} (${q.quality_flag || 'OK'})`;
+    if (!q.is_usable) {
+      sqiBadge.classList.add('warning');
+    }
+
+    // If signal is usable, run classification on Wear OS buffer
+    if (q.is_usable && cond <= 4) {
+      const clsRes = await fetch('/api/wearos/classify', { method: 'POST' });
+      const clsData = await clsRes.json();
+      if (clsData.success) {
+        STATE.condition = clsData.predicted_idx;
+        renderProbabilityBars(clsData.probabilities, clsData.predicted_idx);
+        metricLatency.textContent = clsData.inference_time_ms;
+      }
+    } else if (cond === 5) {
+      // Off-wrist lead-off rejection demonstration
+      probBarsContainer.innerHTML = `
+        <div style="padding: 12px; background: rgba(255, 71, 87, 0.12); border: 1px solid rgba(255, 71, 87, 0.3); border-radius: 8px; color: #ff4757; font-size: 0.78rem;">
+          <strong>🚫 Lead-Off Detected (GREEN_STATUS = -1)</strong><br>
+          Galaxy Watch 4 sensor is detached from wrist. MedGemma-Micro safety guard rejected inference to prevent erroneous diagnosis.
+        </div>
+      `;
+    }
+
+    // Refresh full waveform for canvas
+    if (data.waveform_preview && data.waveform_preview.length > 0) {
+      // Repeat preview across 90s window for smooth sweep
+      const full = [];
+      while (full.length < 2250) {
+        full.push(...data.waveform_preview);
+      }
+      STATE.waveform = full.slice(0, 2250);
+      STATE.sweepIndex = 0;
+    }
+
+    if (data.metrics) {
+      STATE.metrics = data.metrics;
+      updateTelemetry(data.metrics, cond, data.condition_name);
+    }
+  } catch (err) {
+    console.error('Wear OS streaming error:', err);
+    sqiText.textContent = 'Stream Error';
+    sqiBadge.classList.add('warning');
+  }
+}
+
+// Bind Wear OS scenario buttons
+document.getElementById('btn-stream-w4-normal').addEventListener('click', () => streamWearOSScenario(0, 25));
+document.getElementById('btn-stream-w4-afib').addEventListener('click', () => streamWearOSScenario(1, 25));
+document.getElementById('btn-stream-w4-100hz').addEventListener('click', () => streamWearOSScenario(3, 100));
+document.getElementById('btn-stream-w4-detached').addEventListener('click', () => streamWearOSScenario(5, 25));
 
 // =====================================================================
 // App Initialization

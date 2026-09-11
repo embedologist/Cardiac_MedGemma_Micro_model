@@ -35,8 +35,12 @@ def export_conformer_to_coreml(output_dir: str = "coreml_export", latent_dim: in
     if os.path.exists(checkpoint_path):
         try:
             import safetensors.torch
-            sd = safetensors.torch.load_file(checkpoint_path)
-            enc_sd = {k.replace("ppg_encoder.", ""): v.to(torch.float32) for k, v in sd.items() if k.startswith("ppg_encoder.")}
+            with safetensors.safe_open(checkpoint_path, framework="pt") as f:
+                enc_sd = {
+                    k.replace("ppg_encoder.", ""): f.get_tensor(k).to(torch.float32)
+                    for k in f.keys()
+                    if k.startswith("ppg_encoder.")
+                }
             if enc_sd:
                 encoder.load_state_dict(enc_sd, strict=False)
                 print(f"  -> Loaded {len(enc_sd)} trained sensor encoder weights from '{checkpoint_path}'")
@@ -49,6 +53,8 @@ def export_conformer_to_coreml(output_dir: str = "coreml_export", latent_dim: in
 
     # 1. Trace TorchScript with check_trace=False
     traced_path = os.path.join(output_dir, "ppg_conformer_encoder.pt")
+    if os.path.exists(traced_path):
+        os.remove(traced_path)
     traced_model = torch.jit.trace(encoder, example_input, check_trace=False)
     traced_model.save(traced_path)
     size_mb = os.path.getsize(traced_path) / (1024.0 * 1024.0)
@@ -89,8 +95,12 @@ def export_projector_to_coreml(output_dir: str = "coreml_export", sensor_dim: in
     if os.path.exists(checkpoint_path):
         try:
             import safetensors.torch
-            sd = safetensors.torch.load_file(checkpoint_path)
-            proj_sd = {k.replace("ppg_projector.", ""): v.to(torch.float32) for k, v in sd.items() if k.startswith("ppg_projector.")}
+            with safetensors.safe_open(checkpoint_path, framework="pt") as f:
+                proj_sd = {
+                    k.replace("ppg_projector.", ""): f.get_tensor(k).to(torch.float32)
+                    for k in f.keys()
+                    if k.startswith("ppg_projector.")
+                }
             if proj_sd:
                 projector.load_state_dict(proj_sd, strict=False)
                 print(f"  -> Loaded {len(proj_sd)} trained projector weights from '{checkpoint_path}'")
@@ -100,6 +110,8 @@ def export_projector_to_coreml(output_dir: str = "coreml_export", sensor_dim: in
 
     example_input = torch.randn(1, sensor_dim)
     traced_path = os.path.join(output_dir, "ppg_cross_attention_projector.pt")
+    if os.path.exists(traced_path):
+        os.remove(traced_path)
     traced_model = torch.jit.trace(projector, example_input, check_trace=False)
     traced_model.save(traced_path)
     size_mb = os.path.getsize(traced_path) / (1024.0 * 1024.0)

@@ -64,7 +64,11 @@ CONVERSATIONAL_GREETINGS: List[Dict[str, str]] = [
 def load_cardiac_qa_curriculum(dataset_path: str = "cardiac_health_dataset.md", max_per_category: Optional[int] = None) -> List[Dict[str, str]]:
     """Loads and formats Q&A pairs from cardiac_health_dataset.md for student distillation."""
     if not os.path.exists(dataset_path):
-        return []
+        alt_path = os.path.join(os.path.dirname(__file__), dataset_path)
+        if os.path.exists(alt_path):
+            dataset_path = alt_path
+        else:
+            return []
     try:
         with open(dataset_path, "r", encoding="utf-8") as f:
             text = f.read()

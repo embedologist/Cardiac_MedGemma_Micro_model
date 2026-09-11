@@ -114,6 +114,51 @@
           </div>
         </div>
 
+        <!-- Wear OS Smartwatch (Samsung Galaxy Watch 4) Ingestion Bench -->
+        <div class="wearos-bench-card">
+          <div class="wearos-bench-header">
+            <div class="wearos-title-group">
+              <span class="wearos-icon">⌚</span>
+              <div>
+                <span class="wearos-title">Wear OS Telemetry Ingestion (Galaxy Watch 4/5/6)</span>
+                <span class="wearos-sub">Raw BioActive ADC (650k counts) &bull; ChannelClient Ingestion &bull; Anti-Aliased Resampling</span>
+              </div>
+            </div>
+            <div class="wearos-sqi-badge" id="wearos-sqi-badge">
+              <span class="sqi-dot" id="wearos-sqi-dot"></span>
+              <span id="wearos-sqi-text">Buffer Active</span>
+            </div>
+          </div>
+
+          <div class="wearos-buffer-bar-wrapper">
+            <div class="wearos-buffer-labels">
+              <span>90s Rolling Ring Buffer: <strong id="wearos-buffer-count">2,250 / 2,250 samples</strong></span>
+              <span id="wearos-buffer-pct" class="text-cyan font-mono">100% Full</span>
+            </div>
+            <div class="wearos-progress-track">
+              <div class="wearos-progress-fill" id="wearos-progress-fill" style="width: 100%;"></div>
+            </div>
+          </div>
+
+          <div class="wearos-actions-row">
+            <span class="wearos-row-label">Stream Galaxy Watch 4 Scenario:</span>
+            <div class="wearos-chips">
+              <button class="wearos-btn" id="btn-stream-w4-normal" data-cond="0" data-fs="25">
+                <span>⌚</span> Watch 4 Normal (25 Hz)
+              </button>
+              <button class="wearos-btn" id="btn-stream-w4-afib" data-cond="1" data-fs="25">
+                <span>⚡</span> Watch 4 AFib (25 Hz)
+              </button>
+              <button class="wearos-btn" id="btn-stream-w4-100hz" data-cond="3" data-fs="100">
+                <span>🔄</span> Watch 4 Tachy (100 Hz Decimated)
+              </button>
+              <button class="wearos-btn" id="btn-stream-w4-detached" data-cond="5" data-fs="25">
+                <span>🚫</span> Off-Wrist Rejection
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Extracted HRV & Physiological Telemetry -->
         <div class="metrics-grid">
           <div class="metric-card">
