@@ -2,3 +2,5 @@
 *.pt filter=lfs diff=lfs merge=lfs -text
 *.bin filter=lfs diff=lfs merge=lfs -text
 *.onnx filter=lfs diff=lfs merge=lfs -text
+*.tflite filter=lfs diff=lfs merge=lfs -text
+*knowledge_base_350m.json filter=lfs diff=lfs merge=lfs -text

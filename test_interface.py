@@ -146,8 +146,41 @@ def test_api():
     assert exact_disclaimer.strip() in reply_m, f"Medication response MUST contain exact medical disclaimer! Found:\n{reply_m}"
     print("  -> Verified: Response contains exact requested medical disclaimer.")
 
+    # 10. Model Registry Verification
+    print("[11/13] Testing GET /api/models...")
+    res_models = client.get("/api/models")
+    assert res_models.status_code == 200
+    models_data = res_models.json()
+    model_ids = [m["id"] for m in models_data["models"]]
+    assert "tflite_350m" in model_ids, "Unified 350M TFLite model must be present in registry"
+    assert "pytorch_edge" in model_ids, "PyTorch Edge model must be present in registry"
+    print(f"  -> Verified Models: {model_ids}, Active: {models_data['active_engine']}")
+
+    # 11. Dynamic Model Switching
+    print("[12/13] Testing POST /api/models/switch (Dual Engine)...")
+    res_sw1 = client.post("/api/models/switch", json={"model_id": "pytorch_edge"})
+    assert res_sw1.status_code == 200 and res_sw1.json()["active_engine"] == "pytorch_edge"
+    print(f"  -> Switched to PyTorch Engine: {res_sw1.json()['model_name']}")
+
+    res_sw2 = client.post("/api/models/switch", json={"model_id": "tflite_350m"})
+    assert res_sw2.status_code == 200 and res_sw2.json()["active_engine"] == "tflite_350m"
+    print(f"  -> Switched back to TFLite 350M: {res_sw2.json()['model_name']}")
+
+    # 12. Full M2 Benchmark Verification
+    print("[13/13] Testing POST /api/tflite/benchmark (MacBook M2 Automated Suite)...")
+    res_bench = client.post("/api/tflite/benchmark")
+    assert res_bench.status_code == 200
+    bench = res_bench.json()
+    assert bench["all_passed"] is True, f"Benchmark failed: {bench}"
+    assert bench["model"]["size_passed"] is True
+    assert bench["arrhythmia_stability"]["passed"] is True
+    assert bench["arrhythmia_stability"]["score_pct"] >= 95.0
+    assert bench["qa_accuracy"]["passed"] is True
+    assert bench["qa_accuracy"]["score_pct"] >= 90.0
+    print(f"  -> M2 Benchmark: Size {bench['model']['size_mb']}MB, Stability {bench['arrhythmia_stability']['score_pct']}%, QA {bench['qa_accuracy']['score_pct']}%, Latency {bench['latency_benchmark']['latency_ms']}ms")
+
     print("=" * 60)
-    print("ALL 10 API, GREETING, DATASET & EXACT DISCLAIMER TESTS PASSED!")
+    print("ALL 13 API, TFLITE M2, DUAL-ENGINE & DISCLAIMER TESTS PASSED!")
     print("=" * 60)
 
 

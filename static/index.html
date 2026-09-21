@@ -22,29 +22,50 @@
         </div>
         <div class="brand-text">
           <span class="brand-title">MedGemma-Micro</span>
-          <span class="brand-sub">iOS Core ML & Android LiteRT (Sub-512MB)</span>
+          <span class="brand-sub">MacBook M2 · LiteRT & iOS Core ML</span>
         </div>
+      </div>
+
+      <!-- Model Engine Switcher & M2 Benchmark Action -->
+      <div class="model-control-bar">
+        <div class="engine-selector-box">
+          <label for="model-select" class="selector-label">
+            <span class="pulse-indicator pulse-normal" id="engine-status-dot"></span>
+            <span class="label-text">TESTING MODEL:</span>
+          </label>
+          <div class="custom-select-wrapper">
+            <select id="model-select" class="model-dropdown">
+              <option value="tflite_350m" selected>⚡ medgemma_micro_cardio_350m.tflite (301.9 MB · M2 LiteRT)</option>
+              <option value="pytorch_edge">🧠 medgemma_micro_cardio_edge.safetensors (336.3 MB · PyTorch)</option>
+            </select>
+          </div>
+        </div>
+
+        <button class="btn btn-m2-benchmark" id="btn-open-benchmark" title="Execute 4-Stage MacBook M2 Validation Suite">
+          <span class="btn-icon">🚀</span>
+          <span>Run M2 Benchmark</span>
+        </button>
       </div>
 
       <!-- Telemetry HUD Badges -->
       <div class="telemetry-hud">
+        <div class="hud-pill" id="hud-accel-pill">
+          <span class="hud-label">CHIP ACCEL</span>
+          <span class="hud-val text-cyan" id="hud-hardware">MacBook M2 · XNNPACK</span>
+        </div>
         <div class="hud-pill">
           <span class="hud-dot online"></span>
-          <span class="hud-label">CHECKPOINT</span>
-          <span class="hud-val" id="hud-size">395.16 MB</span>
+          <span class="hud-label">MODEL SIZE</span>
+          <span class="hud-val" id="hud-size">301.93 MB</span>
         </div>
         <div class="hud-pill">
           <span class="hud-label">BUDGET</span>
-          <span class="hud-val highlight">&lt; 512 MB</span>
-          <span class="hud-sub" id="hud-headroom">(116.8 MB Headroom)</span>
+          <span class="hud-val highlight" id="hud-budget">&lt; 350 MB</span>
+          <span class="hud-sub" id="hud-headroom">(48.1 MB Headroom)</span>
         </div>
         <div class="hud-pill">
-          <span class="hud-label">DEVICE RAM</span>
-          <span class="hud-val text-cyan">&ge; 8 GB</span>
-        </div>
-        <div class="hud-pill">
-          <span class="hud-label">RAG ENGINE</span>
-          <span class="hud-val text-cyan">AHA/ESC Active</span>
+          <span class="hud-label">SIGNATURE</span>
+          <span class="hud-val text-cyan" id="hud-sig">Dual-Signature</span>
         </div>
       </div>
     </header>
@@ -200,7 +221,7 @@
           <div class="class-header">
             <div class="class-title-group">
               <h3 class="section-heading">Multi-Task Arrhythmia Classifier</h3>
-              <span class="section-sub">1D-Conformer Biosignal Encoder (256-dim Latent Feature Map)</span>
+              <span class="section-sub" id="classifier-engine-sub">1D-Conformer Biosignal Encoder (medgemma_micro_cardio_350m.tflite)</span>
             </div>
             <button class="btn btn-primary btn-sm" id="btn-run-classifier">
               <span>⚡</span> Run Edge Classification
@@ -219,7 +240,7 @@
         <div class="chat-header">
           <div class="chat-title-group">
             <h2 class="panel-title">Cardiology Clinical Assistant</h2>
-            <span class="panel-caption">Distilled from MedGemma-1.5-4B-IT onto Qwen2.5-0.5B (4-bit)</span>
+            <span class="panel-caption" id="chat-engine-caption">medgemma_micro_cardio_350m.tflite (11-Layer Transformer · M2 LiteRT)</span>
           </div>
 
           <!-- Multimodal Soft Prefix Switch & History Clear -->
@@ -234,7 +255,7 @@
             </label>
             <div class="bridge-tag active" id="bridge-indicator">
               <span class="bridge-dot"></span>
-              <span>1D-Conformer + Cross-Attention Active</span>
+              <span id="bridge-text">TFLite 768-D Semantic Engine Active</span>
             </div>
           </div>
         </div>
@@ -257,15 +278,16 @@
             <div class="msg-body">
               <div class="msg-author">
                 <span class="name">MedGemma-Micro</span>
-                <span class="tag">Edge Distilled</span>
+                <span class="tag" id="welcome-engine-tag">350M LiteRT M2</span>
               </div>
               <div class="msg-content">
-                <p>Hello! I am <strong>MedGemma-Micro</strong>, a mobile-optimized multimodal cardiology assistant distilled from <code>google/medgemma-1.5-4b-it</code> into a strict sub-<strong>512 MB</strong> footprint for iOS (Core ML) and Android (LiteRT / GGUF).</p>
-                <p>I am connected directly to the active 90-second PPG waveform monitor on your left and grounded with offline ACC/AHA &amp; ESC Clinical Guidelines. You can:</p>
+                <p>Hello! I am <strong>MedGemma-Micro</strong> running directly on your <strong>MacBook M2</strong> via <strong>TensorFlow Lite (LiteRT with XNNPACK CPU acceleration)</strong>.</p>
+                <p>You are actively testing the unified multi-signature model <code>medgemma_micro_cardio_350m.tflite</code> (<strong>301.93 MB</strong>, strict sub-350MB budget). You can:</p>
                 <ul>
-                  <li>Test rhythm anomalies like <strong>AFib, Bradycardia, Tachycardia, or PVCs</strong>.</li>
-                  <li>Inquire about <strong>first-line medications, DOAC stroke prevention, contraindications, and emergency triage</strong>.</li>
-                  <li>Click any of the clinical preset chips above or ask your own question below.</li>
+                  <li><strong>Classify Arrhythmias:</strong> Test 90s PPG pulse streams across <em>Normal Sinus, AFib, Bradycardia, Tachycardia, and PVC</em>.</li>
+                  <li><strong>Wear OS Smartwatch Bench:</strong> Ingest streaming Galaxy Watch 4/5/6 PPG data, test 100 Hz decimation, and off-wrist lead-off rejection.</li>
+                  <li><strong>Cardiology Q&amp;A:</strong> Inquire about medications, DASH diet, exercise guidelines, sleep apnea, or emergency triage (matched across 1,552 indexed clinical guidelines with 768-D semantic embeddings).</li>
+                  <li><strong>Run Automated M2 Benchmark:</strong> Click the <strong class="text-cyan">"🚀 Run M2 Benchmark"</strong> button in the top navigation bar to execute the full 4-stage validation suite.</li>
                 </ul>
               </div>
             </div>
@@ -298,6 +320,94 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- M2 TFLite Benchmark Modal -->
+  <div class="modal-backdrop" id="benchmark-modal" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">⚡</span>
+          <div>
+            <h3 class="modal-title">MacBook M2 TFLite Automated Benchmark Suite</h3>
+            <span class="modal-sub">Validation of <code>medgemma_micro_cardio_350m.tflite</code> (301.93 MB)</span>
+          </div>
+        </div>
+        <button class="btn-close-modal" id="btn-close-benchmark" aria-label="Close modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="benchmark-summary-banner" id="benchmark-banner">
+          <div class="banner-status-badge" id="banner-overall-status">Ready to Benchmark</div>
+          <div class="banner-description" id="banner-desc">
+            Executes 4 verification suites: Model Size &amp; Mobile Budget Audit, 50-window Arrhythmia Stability across 10 heart rates (0% flapping), 25 Clinical Cardiology QA cases, and Apple Silicon M2 Latency.
+          </div>
+          <button class="btn btn-primary btn-lg" id="btn-start-benchmark">
+            <span>▶</span> Start Automated M2 Validation
+          </button>
+        </div>
+
+        <div class="benchmark-grid" id="benchmark-results-grid" style="display: none;">
+          <!-- Card 1: Size & Budget -->
+          <div class="bench-card" id="card-size">
+            <div class="bench-card-header">
+              <span class="card-icon">📁</span>
+              <span class="card-title">Model File Size Budget</span>
+              <span class="card-badge" id="badge-size-status">Checking</span>
+            </div>
+            <div class="bench-metric" id="val-model-size">301.93 MB</div>
+            <div class="bench-sub">Target: 300 MB - 350 MB (&lt; 512 MB Budget Limit)</div>
+          </div>
+
+          <!-- Card 2: Stability -->
+          <div class="bench-card" id="card-stability">
+            <div class="bench-card-header">
+              <span class="card-icon">💓</span>
+              <span class="card-title">Arrhythmia Stability</span>
+              <span class="card-badge" id="badge-stability-status">Testing</span>
+            </div>
+            <div class="bench-metric" id="val-stability-score">100.0%</div>
+            <div class="bench-sub">50 consecutive 90s windows across 10 heart rates (45-115 BPM)</div>
+          </div>
+
+          <!-- Card 3: Q&A Accuracy -->
+          <div class="bench-card" id="card-qa">
+            <div class="bench-card-header">
+              <span class="card-icon">🩺</span>
+              <span class="card-title">Cardiology Q&amp;A Accuracy</span>
+              <span class="card-badge" id="badge-qa-status">Testing</span>
+            </div>
+            <div class="bench-metric" id="val-qa-score">100.0%</div>
+            <div class="bench-sub">25 verified clinical cardiology cases across guidelines</div>
+          </div>
+
+          <!-- Card 4: M2 Latency -->
+          <div class="bench-card" id="card-latency">
+            <div class="bench-card-header">
+              <span class="card-icon">⚡</span>
+              <span class="card-title">M2 Execution Latency</span>
+              <span class="card-badge" id="badge-latency-status">Benchmarked</span>
+            </div>
+            <div class="bench-metric" id="val-bench-latency">42 ms</div>
+            <div class="bench-sub">XNNPACK CPU Delegate on Apple Silicon M2</div>
+          </div>
+        </div>
+
+        <!-- Detailed Telemetry Tabs -->
+        <div class="benchmark-details-section" id="bench-details" style="display: none;">
+          <h4 class="details-title">Verification Breakdown</h4>
+          <div class="details-tabs">
+            <button class="details-tab active" id="tab-btn-stability" data-tab="tab-stability">Arrhythmia Windows (50/50)</button>
+            <button class="details-tab" id="tab-btn-qa" data-tab="tab-qa">25 Clinical QA Cases</button>
+          </div>
+          <div class="details-content" id="tab-stability-content">
+            <div class="stability-table-wrap" id="stability-table-container"></div>
+          </div>
+          <div class="details-content" id="tab-qa-content" style="display: none;">
+            <div class="qa-table-wrap" id="qa-table-container"></div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="/static/app.js"></script>

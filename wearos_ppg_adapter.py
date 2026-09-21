@@ -383,7 +383,51 @@ class WearOSPPGAdapter:
 
 
 # =====================================================================
-# 4. REAL-TIME STREAMING CIRCULAR RING BUFFER
+# 4. TEMPORAL CONSENSUS FILTER FOR MULTI-READING STABILITY
+# =====================================================================
+
+class TemporalConsensusFilter:
+    """
+    Stabilizes arrhythmia predictions across multiple consecutive 90s telemetry readings.
+    Prevents flapping/jumping between conditions due to micro-fluctuations in heart rate
+    or motion transients on smartwatches (Samsung Galaxy Watch 7).
+    """
+
+    def __init__(self, history_size: int = 4, consensus_threshold: float = 0.50):
+        self.history_size = history_size
+        self.consensus_threshold = consensus_threshold
+        self.history: deque = deque(maxlen=history_size)
+
+    def update(self, condition_idx: int, probabilities: np.ndarray) -> Tuple[int, np.ndarray, bool]:
+        """
+        Updates consensus with latest 90s evaluation.
+        Returns:
+            stable_condition_idx: int
+            averaged_probabilities: np.ndarray
+            is_consensus_reached: bool
+        """
+        probs = np.asarray(probabilities, dtype=np.float32)
+        self.history.append((condition_idx, probs))
+
+        # Exponentially weighted moving average over recent 90s windows
+        weights = np.linspace(0.65, 1.0, len(self.history))
+        weights /= np.sum(weights)
+
+        avg_probs = np.zeros_like(probs)
+        for w, (_, p) in zip(weights, self.history):
+            avg_probs += w * p
+
+        stable_idx = int(np.argmax(avg_probs))
+        confidence = float(avg_probs[stable_idx])
+        is_consensus = bool(confidence >= self.consensus_threshold or len(self.history) >= 2)
+        return stable_idx, avg_probs, is_consensus
+
+    def clear(self):
+        self.history.clear()
+
+
+# =====================================================================
+# 5. REAL-TIME STREAMING CIRCULAR RING BUFFER
 # =====================================================================
 
 class WearOSStreamBuffer:
@@ -400,6 +444,7 @@ class WearOSStreamBuffer:
         self.target_fs = target_fs
         self.required_samples = window_sec * target_fs  # 2250
         self.adapter = WearOSPPGAdapter(target_fs=target_fs)
+        self.consensus_filter = TemporalConsensusFilter(history_size=4)
 
         self._lock = threading.Lock()
         # Ring buffer storage: uses deque(maxlen) for O(1) append and automatic eviction
@@ -504,3 +549,4 @@ class WearOSStreamBuffer:
             self._last_conditioned_cache = None
             self._last_quality_cache = None
             self._last_sqi = {"sqi": 0.0, "is_usable": False, "quality_flag": "CLEARED"}
+            self.consensus_filter.clear()

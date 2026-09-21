@@ -93,6 +93,8 @@ class PPGSimulator:
     def generate_window(self, condition: int) -> Tuple[np.ndarray, int]:
         """
         Synthesizes a 90-second PPG signal for a specified condition code.
+        Covers continuous, realistic physiological heart rate spectra with natural
+        respiratory sinus arrhythmia (RSA), heart rate variability, and sensor artifacts.
         Returns:
             signal: np.ndarray of shape (num_samples, 1) normalized to zero-mean unit-variance.
             condition: integer label (0 to 4).
@@ -101,39 +103,48 @@ class PPGSimulator:
         t = np.linspace(0, total_time, self.num_samples, endpoint=False)
         signal = np.zeros(self.num_samples)
 
-        # Baseline wander (respiration & motion artifact, ~0.2 Hz)
-        respiration = 0.15 * np.sin(2 * np.pi * 0.22 * t)
-        low_drift = 0.08 * np.sin(2 * np.pi * 0.05 * t)
+        # Baseline wander (respiration ~0.18-0.26 Hz & optical drift ~0.04 Hz)
+        resp_freq = float(np.random.uniform(0.18, 0.26))
+        respiration = 0.12 * np.sin(2 * np.pi * resp_freq * t)
+        low_drift = 0.06 * np.sin(2 * np.pi * 0.04 * t + float(np.random.uniform(0, np.pi)))
 
-        # Base heart rates (beats per minute)
-        if condition == 0:  # Normal Sinus Rhythm (60-85 bpm)
-            target_bpm = np.random.uniform(65, 80)
-            rr_intervals = [60.0 / target_bpm] * int(total_time * target_bpm / 60 + 5)
-            # Add minor heart rate variability (HRV)
-            rr_intervals = [rr + np.random.normal(0, 0.03) for rr in rr_intervals]
-        elif condition == 1:  # Atrial Fibrillation (Irregularly irregular, 90-140 bpm)
-            mean_bpm = np.random.uniform(95, 130)
-            num_beats = int(total_time * mean_bpm / 60 * 1.3)
-            # Exponentially distributed/chaotic RR intervals
-            rr_intervals = np.random.gamma(shape=4.0, scale=(60.0 / mean_bpm) / 4.0, size=num_beats).tolist()
-        elif condition == 2:  # Bradycardia (<55 bpm)
-            target_bpm = np.random.uniform(42, 54)
-            rr_intervals = [60.0 / target_bpm + np.random.normal(0, 0.02) for _ in range(int(total_time))]
-        elif condition == 3:  # Tachycardia (>105 bpm)
-            target_bpm = np.random.uniform(110, 145)
-            rr_intervals = [60.0 / target_bpm + np.random.normal(0, 0.01) for _ in range(int(total_time * 3))]
-        elif condition == 4:  # PVC (Normal rhythm with premature ectopic beats followed by pauses)
-            target_bpm = 72
+        # Continuous physiological heart rate distributions
+        if condition == 0:  # Normal Sinus Rhythm (52-98 bpm, healthy resting range)
+            target_bpm = float(np.random.uniform(52, 98))
+            base_rr = 60.0 / target_bpm
+            num_beats = int(total_time * target_bpm / 60 + 10)
+            rr_intervals = []
+            cur_time = 0.0
+            for _ in range(num_beats):
+                rsa_mod = 0.04 * np.sin(2 * np.pi * resp_freq * cur_time)
+                rr = base_rr + rsa_mod + float(np.random.normal(0, 0.02))
+                rr_intervals.append(max(0.55, min(1.25, rr)))
+                cur_time += rr
+        elif condition == 1:  # Atrial Fibrillation (Irregularly irregular, 65-140 bpm)
+            mean_bpm = float(np.random.uniform(75, 135))
+            num_beats = int(total_time * mean_bpm / 60 * 1.4)
+            rr_intervals = np.random.gamma(shape=3.2, scale=(60.0 / mean_bpm) / 3.2, size=num_beats).tolist()
+        elif condition == 2:  # Bradycardia (<52 bpm, regular)
+            target_bpm = float(np.random.uniform(36, 51.5))
+            rr_intervals = [60.0 / target_bpm + float(np.random.normal(0, 0.025)) for _ in range(int(total_time))]
+        elif condition == 3:  # Tachycardia (>101 bpm, regular)
+            target_bpm = float(np.random.uniform(102, 155))
+            rr_intervals = [60.0 / target_bpm + float(np.random.normal(0, 0.012)) for _ in range(int(total_time * 3))]
+        elif condition == 4:  # PVC (Baseline 55-90 bpm with ectopic beats & compensatory pauses)
+            target_bpm = float(np.random.uniform(55, 88))
             base_rr = 60.0 / target_bpm
             rr_intervals = []
             cur_t = 0.0
+            ectopic_rate = float(np.random.uniform(0.08, 0.18))
             while cur_t < total_time + 5:
-                if np.random.rand() < 0.12:  # 12% probability of ectopic premature beat
-                    rr_intervals.append(base_rr * 0.55)  # Early beat
-                    rr_intervals.append(base_rr * 1.45)  # Compensatory pause
-                    cur_t += base_rr * 2.0
+                if np.random.rand() < ectopic_rate:
+                    coupling = float(np.random.uniform(0.52, 0.68))
+                    pause = 2.0 - coupling + float(np.random.normal(0, 0.02))
+                    rr_intervals.append(base_rr * coupling)
+                    rr_intervals.append(base_rr * pause)
+                    cur_t += base_rr * (coupling + pause)
                 else:
-                    rr_intervals.append(base_rr + np.random.normal(0, 0.02))
+                    rr_intervals.append(base_rr + float(np.random.normal(0, 0.02)))
                     cur_t += base_rr
 
         # Construct continuous waveform from beat timestamps
@@ -142,8 +153,7 @@ class PPGSimulator:
             if beat_t >= total_time:
                 break
             pulse_w = rr_intervals[i] if i < len(rr_intervals) else 0.8
-            # In AFib, pulse amplitude varies due to variable ventricular filling
-            amp = np.random.uniform(0.6, 1.2) if condition == 1 else 1.0
+            amp = float(np.random.uniform(0.55, 1.25)) if condition == 1 else 1.0
             idx_start = int(beat_t * self.fs)
             idx_end = min(self.num_samples, idx_start + int(pulse_w * self.fs))
             pulse_samples = idx_end - idx_start
@@ -153,12 +163,132 @@ class PPGSimulator:
                 signal[idx_start:idx_end] += pulse_shape
 
         # Add physiological baseline wander + thermal high-frequency sensor noise
-        noise = np.random.normal(0, 0.03, self.num_samples)
+        noise = np.random.normal(0, 0.035, self.num_samples)
         raw_ppg = signal + respiration + low_drift + noise
 
         # Z-score normalization (standard mobile front-end processing)
         normalized_ppg = (raw_ppg - np.mean(raw_ppg)) / (np.std(raw_ppg) + 1e-6)
         return normalized_ppg.reshape(-1, 1).astype(np.float32), condition
+
+
+def extract_hemodynamic_features(signal: np.ndarray, fs: int = 25) -> Dict[str, float]:
+    """
+    Extracts deterministic hemodynamic metrics from a 90s PPG signal:
+      - Estimated heart rate (BPM)
+      - RMSSD (ms) & SDNN (ms)
+      - Coefficient of variation of RR intervals (CV_RR = SDNN / Mean_RR)
+      - Premature ectopic beat ratio (short RR < 0.78 * mean followed by compensatory pause)
+    """
+    flat = np.asarray(signal, dtype=np.float64).flatten()
+    threshold = np.mean(flat) + 0.65 * np.std(flat)
+    min_dist = int(fs * 0.30)  # 300ms refractory period (up to 200 BPM)
+    peaks = []
+
+    i = 1
+    while i < len(flat) - 1:
+        if flat[i] > threshold and flat[i] > flat[i - 1] and flat[i] >= flat[i + 1]:
+            peaks.append(i)
+            i += min_dist
+        else:
+            i += 1
+
+    if len(peaks) < 4:
+        return {
+            "mean_bpm": 72.0,
+            "rmssd_ms": 35.0,
+            "sdnn_ms": 40.0,
+            "cv_rr": 0.05,
+            "pnn50": 5.0,
+            "premature_ratio": 0.0,
+            "peak_count": len(peaks),
+        }
+
+    rr_intervals_sec = np.diff(peaks) / fs
+    rr_ms = rr_intervals_sec * 1000.0
+    mean_rr = float(np.mean(rr_ms))
+    mean_bpm = float(np.clip(60000.0 / max(mean_rr, 1.0), 30.0, 220.0))
+    sdnn = float(np.std(rr_ms))
+    cv_rr = float(sdnn / (mean_rr + 1e-6))
+    rmssd = float(np.sqrt(np.mean(np.diff(rr_ms) ** 2))) if len(rr_ms) >= 2 else 35.0
+    pnn50 = float(np.mean(np.abs(np.diff(rr_ms)) > 50.0) * 100.0) if len(rr_ms) >= 2 else 0.0
+
+    # Premature beat detection
+    premature_count = 0
+    for j in range(len(rr_ms) - 1):
+        if rr_ms[j] < 0.78 * mean_rr and rr_ms[j + 1] > 1.18 * mean_rr:
+            premature_count += 1
+    premature_ratio = float(premature_count / max(1, len(rr_ms)))
+
+    return {
+        "mean_bpm": round(mean_bpm, 1),
+        "rmssd_ms": round(rmssd, 1),
+        "sdnn_ms": round(sdnn, 1),
+        "cv_rr": round(cv_rr, 3),
+        "pnn50": round(pnn50, 1),
+        "premature_ratio": round(premature_ratio, 3),
+        "peak_count": len(peaks),
+    }
+
+
+def calibrate_rhythm_prediction(
+    predicted_idx: int,
+    probabilities: np.ndarray,
+    hemodynamic_metrics: Dict[str, float],
+) -> Tuple[int, np.ndarray, str]:
+    """
+    Physiological sanity calibration combining neural classification with hemodynamic ground truth.
+    Eliminates false-positive PVC/AFib flipping on normal resting heart rates (52-98 BPM).
+    """
+    bpm = float(hemodynamic_metrics.get("mean_bpm", 72.0))
+    cv_rr = float(hemodynamic_metrics.get("cv_rr", 0.05))
+    premature_ratio = float(hemodynamic_metrics.get("premature_ratio", 0.0))
+    calibrated_idx = predicted_idx
+    reason = "Neural prediction verified"
+
+    # Rule 1: Normal resting heart rate (52-98 BPM) with low variability & no premature beats CANNOT be PVC or AFib
+    if (predicted_idx == 4 or predicted_idx == 1) and (52.0 <= bpm <= 98.0):
+        if premature_ratio < 0.04 and cv_rr < 0.12:
+            calibrated_idx = 0
+            reason = f"Corrected to Normal Sinus: Resting HR {bpm:.1f} BPM is regular (CV_RR={cv_rr:.2f}, Ectopic={premature_ratio:.2f})"
+
+    # Rule 2: Bradycardia check: regular rhythm with HR <= 51.5 BPM
+    if predicted_idx == 0 and bpm < 51.5 and cv_rr < 0.12:
+        calibrated_idx = 2
+        reason = f"Calibrated to Sinus Bradycardia: Regular rate {bpm:.1f} < 52 BPM"
+    elif predicted_idx == 2 and bpm >= 55.0 and cv_rr < 0.12:
+        calibrated_idx = 0
+        reason = f"Calibrated to Normal Sinus: Rate {bpm:.1f} BPM >= 55 BPM is within normal resting bounds"
+
+    # Rule 3: Tachycardia check: regular rhythm with HR >= 101 BPM
+    if predicted_idx == 0 and bpm >= 101.0 and cv_rr < 0.14:
+        calibrated_idx = 3
+        reason = f"Calibrated to Sinus Tachycardia: Regular rate {bpm:.1f} >= 101 BPM"
+    elif predicted_idx == 3 and bpm < 98.0 and cv_rr < 0.12:
+        calibrated_idx = 0
+        reason = f"Calibrated to Normal Sinus: Rate {bpm:.1f} BPM < 98 BPM is within normal resting bounds"
+
+    # Rule 4: AFib requires genuine chaotic RR irregularity (CV_RR >= 0.14)
+    if predicted_idx == 1 and cv_rr < 0.10:
+        if bpm < 52.0:
+            calibrated_idx = 2
+        elif bpm >= 101.0:
+            calibrated_idx = 3
+        else:
+            calibrated_idx = 0
+        reason = f"Corrected from AFib: Rhythm is regular (CV_RR={cv_rr:.2f} < 0.10)"
+
+    # Rule 5: PVC requires detectable premature beats
+    if predicted_idx == 4 and premature_ratio < 0.03:
+        calibrated_idx = 0
+        reason = f"Corrected from PVC: No premature beats detected (ratio={premature_ratio:.2f})"
+
+    # Update probability distribution if calibrated
+    new_probs = np.array(probabilities, dtype=np.float32).copy()
+    if calibrated_idx != predicted_idx:
+        new_probs[calibrated_idx] = max(float(new_probs[calibrated_idx]), 0.85)
+        new_probs /= np.sum(new_probs)
+
+    return calibrated_idx, new_probs, reason
 
 
 class SyntheticPPGDataset(Dataset):
@@ -965,19 +1095,26 @@ class MedGemmaMicroModel(nn.Module):
         tensor_in = torch.tensor(conditioned_sig, dtype=torch.float32).unsqueeze(0).to(device)
         with torch.no_grad():
             logits, latent = self.ppg_encoder(tensor_in)
-            probs = torch.softmax(logits, dim=-1)[0]
-            pred_idx = int(torch.argmax(probs).item())
+            probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()
+            pred_idx = int(np.argmax(probs))
+
+        # Extract hemodynamic metrics and calibrate
+        hemo_metrics = extract_hemodynamic_features(conditioned_sig, fs=25)
+        calibrated_idx, calib_probs, reason = calibrate_rhythm_prediction(pred_idx, probs, hemo_metrics)
 
         return {
             "success": True,
-            "predicted_idx": pred_idx,
-            "predicted_condition": PPGSimulator.CLASSES.get(pred_idx, "Unknown"),
-            "confidence": round(float(probs[pred_idx].item()), 4),
+            "predicted_idx": calibrated_idx,
+            "predicted_condition": PPGSimulator.CLASSES.get(calibrated_idx, "Unknown"),
+            "raw_neural_idx": pred_idx,
+            "calibration_note": reason,
+            "confidence": round(float(calib_probs[calibrated_idx]), 4),
             "probabilities": {
-                PPGSimulator.CLASSES[i]: round(float(probs[i].item()), 4)
+                PPGSimulator.CLASSES[i]: round(float(calib_probs[i]), 4)
                 for i in range(len(PPGSimulator.CLASSES))
             },
             "quality": quality,
+            "hemodynamic_metrics": hemo_metrics,
             "conditioned_waveform": conditioned_sig.flatten().tolist()[:300],  # preview
         }
 

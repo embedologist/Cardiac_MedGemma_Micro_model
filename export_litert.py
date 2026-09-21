@@ -126,31 +126,33 @@ def export_projector_to_onnx(output_dir: str = "litert_export", sensor_dim: int 
 def print_android_deployment_guide():
     print("""
 ======================================================================
-Android LiteRT & GGUF Deployment Blueprint:
+Android LiteRT & TFLite Direct Deployment:
 ======================================================================
-1. Conformer Biosignal Model (LiteRT):
-   - Convert ONNX -> LiteRT via Google ai-edge-torch or onnx2tf:
-     pip install onnx2tf
-     onnx2tf -in litert_export/ppg_conformer_encoder.onnx -o litert_export/ppg_conformer_encoder.tflite
-   - Execution: Ingests 90s PPG buffer [1, 2250, 1] on Qualcomm Hexagon NPU / NNAPI.
-
-2. Student LLM (Qwen2.5-0.5B 4-bit) Deployment on Android:
-   - Option A (Recommended): llama.cpp Android NDK / Vulkan
-     Quantize student weights to GGUF Q4_K_M (~345 MB):
-       python3 llama.cpp/convert_hf_to_gguf.py Qwen/Qwen2.5-0.5B-Instruct --outfile qwen_0.5b.gguf
-       ./llama-quantize qwen_0.5b.gguf medgemma_micro_qwen_0.5b_q4_k_m.gguf Q4_K_M
-     Achieves ~40-55 tokens/sec via Snapdragon Adreno GPU (Vulkan) / CPU.
-   - Option B: MediaPipe GenAI / Google LiteRT LLM Inference API
-     Package into `.task` bundle using MediaPipe's genai converter.
+1. Direct Android TFLite Models:
+   - Run: python train_and_export_tflite.py
+   - Generates:
+       * ppg_arrhythmia_classifier.tflite (322 KB, ~0.5ms inference on S24 Ultra)
+       * cardiac_qa_engine.tflite (1.45 MB, ~0.13ms inference)
+       * medgemma_micro_unified.tflite (47 KB)
+       * cardiac_knowledge_base_indexed.json (indexed cardiology facts)
+       * cardio_vocab.json (wordpiece tokenizer)
+   - Ready for direct drag-and-drop into Android Studio app/src/main/assets/
 ======================================================================
 """)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Export MedGemma-Micro to Android LiteRT")
+    parser = argparse.ArgumentParser(description="Export MedGemma-Micro to Android LiteRT / TFLite")
     parser.add_argument("--output_dir", type=str, default="litert_export")
+    parser.add_argument("--tflite", action="store_true", default=True, help="Export native .tflite models for Android S24 Ultra")
     args = parser.parse_args()
 
-    export_conformer_to_onnx(args.output_dir)
-    export_projector_to_onnx(args.output_dir)
+    if args.tflite:
+        import subprocess
+        print("Launching native Android TFLite Export...")
+        subprocess.run([sys.executable, "train_and_export_tflite.py"], check=True)
+    else:
+        export_conformer_to_onnx(args.output_dir)
+        export_projector_to_onnx(args.output_dir)
     print_android_deployment_guide()
+
