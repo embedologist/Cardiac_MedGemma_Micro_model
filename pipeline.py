@@ -861,9 +861,15 @@ class ClinicalTextDataset(Dataset):
 
     def __init__(self, pairs: List[Dict[str, str]], tokenizer: PreTrainedTokenizer, max_length: int = 256):
         self.samples = []
+        eos_tok = tokenizer.eos_token if tokenizer.eos_token else "<|eot_id|>"
         for item in pairs:
-            prompt_part = f"<|im_start|>user\n{item['instruction']}<|im_end|>\n<|im_start|>assistant\n"
-            full_text = f"{prompt_part}{item['response']}<|im_end|>"
+            if hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template:
+                messages = [{"role": "user", "content": item["instruction"]}]
+                prompt_part = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                full_text = f"{prompt_part}{item['response']}{eos_tok}"
+            else:
+                prompt_part = f"<|im_start|>user\n{item['instruction']}<|im_end|>\n<|im_start|>assistant\n"
+                full_text = f"{prompt_part}{item['response']}<|im_end|>"
 
             prompt_ids = tokenizer(prompt_part, add_special_tokens=False)["input_ids"]
             prompt_len = len(prompt_ids)
@@ -881,7 +887,8 @@ class ClinicalTextDataset(Dataset):
             # Labels for causal language modeling: mask user prompt tokens with -100
             labels = input_ids.clone()
             labels[:min(prompt_len, max_length)] = -100
-            labels[labels == tokenizer.pad_token_id] = -100
+            if tokenizer.pad_token_id is not None:
+                labels[labels == tokenizer.pad_token_id] = -100
             self.samples.append({
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
@@ -1247,14 +1254,19 @@ def export_and_verify_checkpoint(
     model: MedGemmaMicroModel,
     output_path: str = "medgemma_micro_cardio_edge.safetensors",
     target_dtype: torch.dtype = torch.float16,
-    budget_limit_mb: float = 512.0,
+    budget_limit_mb: Optional[float] = None,
 ) -> float:
     """
     Serializes the complete student backbone, Conformer PPG encoder, classifier, and projection bridge
-    into a unified .safetensors checkpoint file and strictly asserts < 512 MB mobile size limit.
+    into a unified .safetensors checkpoint file and strictly asserts mobile size budget limit
+    (< 512 MB for Qwen-0.5B, < 2048 MB for Llama-3.2-1B).
     """
     logger.info("Exporting complete model state dict to '%s'...", output_path)
     model.eval()
+
+    student_id = getattr(model.student_lm.config, "_name_or_path", "unsloth/Llama-3.2-1B-Instruct")
+    if budget_limit_mb is None:
+        budget_limit_mb = 512.0 if "qwen" in student_id.lower() or "qwen" in output_path.lower() else 2048.0
 
     raw_state_dict = model.state_dict()
     compact_state_dict = {}
@@ -1274,11 +1286,11 @@ def export_and_verify_checkpoint(
     metadata = {
         "architecture": "MedGemmaMicro-Multimodal-Cardiology-Mobile",
         "target_os": "iOS (Core ML / Metal) & Android (LiteRT / GGUF)",
-        "min_device_ram": "8GB",
+        "min_device_ram": "4GB - 8GB" if "qwen" in student_id.lower() else "8GB",
         "sensor_window": "90s @ 25Hz",
         "encoder_type": getattr(model, "encoder_type", "conformer"),
         "projector_type": getattr(model, "projector_type", "cross_attention"),
-        "student_backbone": "Qwen2.5-0.5B-Instruct",
+        "student_backbone": student_id,
         "distilled_from": "google/medgemma-1.5-4b-it",
         "export_format": "safetensors",
         "precision": str(target_dtype),
@@ -1316,7 +1328,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=2, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
     parser.add_argument("--hf_token", type=str, default=None, help="HuggingFace access token")
-    parser.add_argument("--student_id", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="Student model ID")
+    parser.add_argument("--student_id", type=str, default="unsloth/Llama-3.2-1B-Instruct", help="Student model ID")
+    parser.add_argument("--budget_mb", type=float, default=None, help="Mobile memory budget limit in MB")
     parser.add_argument("--skip_training", action="store_true", help="Quick export/dry-run test without training")
     args = parser.parse_args()
 

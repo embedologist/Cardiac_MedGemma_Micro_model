@@ -201,26 +201,43 @@ async function fetchStatus() {
         hudSig.textContent = data.active_engine === 'tflite_350m' ? 'Dual-Signature' : 'Causal LM Prefix';
       }
       const modelSelect = document.getElementById('model-select');
-      if (modelSelect && data.active_engine) {
+      if (modelSelect) {
+        modelSelect.innerHTML = `
+          <option value="pytorch_edge" ${data.active_engine === 'pytorch_edge' ? 'selected' : ''}>🧠 medgemma_micro_cardio_edge.safetensors (1,564.38 MB · Llama-3.2-1B Multimodal [v2.0 New])</option>
+          <option value="pytorch_qwen_05b" ${data.active_engine === 'pytorch_qwen_05b' ? 'selected' : ''}>🔬 medgemma_micro_qwen_0.5b.safetensors (336.31 MB · Qwen2.5-0.5B Sub-512MB [v1.0 Legacy])</option>
+          <option value="tflite_350m" ${data.active_engine === 'tflite_350m' ? 'selected' : ''}>⚡ medgemma_micro_cardio_350m.tflite (301.93 MB · M2 LiteRT FlatBuffer)</option>
+        `;
         modelSelect.value = data.active_engine;
       }
       const chatEngineCaption = document.getElementById('chat-engine-caption');
       if (chatEngineCaption) {
-        chatEngineCaption.textContent = data.active_engine === 'tflite_350m'
-          ? 'medgemma_micro_cardio_350m.tflite (11-Layer Transformer · M2 LiteRT)'
-          : `${data.model_name} (PyTorch + Qwen 0.5B)`;
+        if (data.active_engine === 'tflite_350m') {
+          chatEngineCaption.textContent = 'medgemma_micro_cardio_350m.tflite (11-Layer Transformer · M2 LiteRT)';
+        } else if (data.active_engine === 'pytorch_qwen_05b') {
+          chatEngineCaption.textContent = `${data.model_name} (Qwen2.5-0.5B-Instruct · 1D-Conformer · 336.31 MB [v1.0])`;
+        } else {
+          chatEngineCaption.textContent = `${data.model_name} (Llama-3.2-1B-Instruct · 1D-Conformer Multimodal · 1,564.38 MB [v2.0])`;
+        }
       }
       const classifierEngineSub = document.getElementById('classifier-engine-sub');
       if (classifierEngineSub) {
-        classifierEngineSub.textContent = data.active_engine === 'tflite_350m'
-          ? '1D-Conformer Biosignal Encoder (medgemma_micro_cardio_350m.tflite)'
-          : '1D-Conformer Biosignal Encoder (PyTorch Checkpoint)';
+        if (data.active_engine === 'tflite_350m') {
+          classifierEngineSub.textContent = '1D-Conformer Biosignal Encoder (medgemma_micro_cardio_350m.tflite)';
+        } else if (data.active_engine === 'pytorch_qwen_05b') {
+          classifierEngineSub.textContent = '1D-Conformer Biosignal Encoder (Qwen2.5-0.5B Checkpoint · 336.31 MB)';
+        } else {
+          classifierEngineSub.textContent = '1D-Conformer Biosignal Encoder (Llama-3.2-1B Checkpoint · 1,564.38 MB)';
+        }
       }
       const bridgeText = document.getElementById('bridge-text');
       if (bridgeText) {
-        bridgeText.textContent = data.active_engine === 'tflite_350m'
-          ? 'TFLite 768-D Semantic Engine Active'
-          : '1D-Conformer + Cross-Attention Active';
+        if (data.active_engine === 'tflite_350m') {
+          bridgeText.textContent = 'TFLite 768-D Semantic Engine Active';
+        } else if (data.active_engine === 'pytorch_qwen_05b') {
+          bridgeText.textContent = '1D-Conformer + 896-D Cross-Attention Active';
+        } else {
+          bridgeText.textContent = '1D-Conformer + 2048-D Cross-Attention Active';
+        }
       }
     }
   } catch (err) {

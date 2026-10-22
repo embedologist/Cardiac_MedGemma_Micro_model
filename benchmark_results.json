@@ -1,13 +1,16 @@
 {
-  "timestamp": "2026-09-11 23:35:44",
+  "timestamp": "2026-10-21 19:00:41",
   "model_status": {
     "status": "ready",
+    "active_engine": "pytorch_edge",
+    "model_name": "medgemma_micro_cardio_edge.safetensors",
     "checkpoint_path": "medgemma_micro_cardio_edge.safetensors",
-    "size_mb": 336.31,
-    "budget_limit_mb": 512.0,
-    "headroom_mb": 175.69,
-    "total_parameters": 502859685,
-    "student_backbone": "Qwen/Qwen2.5-0.5B-Instruct",
+    "size_mb": 1564.38,
+    "budget_limit_mb": 2048.0,
+    "headroom_mb": 483.62,
+    "total_parameters": 1272088869,
+    "framework": "PyTorch + HuggingFace Transformers",
+    "student_backbone": "unsloth/Llama-3.2-1B-Instruct",
     "encoder_architecture": "conformer",
     "projector_architecture": "cross_attention",
     "rag_guidelines": "ACC/AHA & ESC On-Device Index (<25MB)",
@@ -20,6 +23,12 @@
     },
     "current_condition": 0,
     "device": "cpu",
+    "hardware": {
+      "chip": "Apple Silicon M2 (ARM64)",
+      "os": "macOS (arm64)",
+      "acceleration": "XNNPACK CPU Delegate / LiteRT",
+      "threads": 4
+    },
     "target_platforms": [
       "iOS (Core ML / Metal)",
       "Android (LiteRT / GGUF)"
@@ -27,9 +36,9 @@
     "min_device_ram": "8GB"
   },
   "biosignal_accuracy": {
-    "overall_accuracy_pct": 100.0,
+    "overall_accuracy_pct": 96.0,
     "total_tested": 75,
-    "correct": 75,
+    "correct": 72,
     "confusion_matrix": {
       "Normal Sinus Rhythm": {
         "Normal Sinus Rhythm": 15,
@@ -60,70 +69,72 @@
         "Premature Ventricular Contractions (PVC)": 0
       },
       "Premature Ventricular Contractions (PVC)": {
-        "Normal Sinus Rhythm": 0,
-        "Atrial Fibrillation (AFib)": 0,
+        "Normal Sinus Rhythm": 2,
+        "Atrial Fibrillation (AFib)": 1,
         "Bradycardia": 0,
         "Tachycardia": 0,
-        "Premature Ventricular Contractions (PVC)": 15
+        "Premature Ventricular Contractions (PVC)": 12
       }
     },
     "dsp_calibration": {
       "Normal Sinus Rhythm": {
-        "mean_bpm": 73.6,
-        "mean_rmssd": 75.5
+        "mean_bpm": 77.1,
+        "mean_rmssd": 92.4
       },
       "Atrial Fibrillation (AFib)": {
-        "mean_bpm": 86.1,
-        "mean_rmssd": 470.5
+        "mean_bpm": 82.1,
+        "mean_rmssd": 541.0
       },
       "Bradycardia": {
-        "mean_bpm": 51.7,
-        "mean_rmssd": 349.0
+        "mean_bpm": 46.5,
+        "mean_rmssd": 293.3
       },
       "Tachycardia": {
-        "mean_bpm": 129.8,
-        "mean_rmssd": 38.6
+        "mean_bpm": 126.8,
+        "mean_rmssd": 41.5
       },
       "Premature Ventricular Contractions (PVC)": {
-        "mean_bpm": 72.8,
-        "mean_rmssd": 408.4
+        "mean_bpm": 75.4,
+        "mean_rmssd": 401.2
       }
     }
   },
   "prompt_accuracy": {
-    "overall_accuracy_pct": 65.0,
+    "overall_accuracy_pct": 80.0,
     "total_prompts": 20,
-    "passed_prompts": 13,
-    "avg_tokens_per_sec": 16.1,
+    "passed_prompts": 16,
+    "avg_tokens_per_sec": 8.08,
     "detailed_results": [
       {
         "id": "TEL-01",
         "domain": "Telemetry & Rhythm Interpretation",
         "condition": "Atrial Fibrillation (AFib)",
         "prompt": "My smartwatch flagged an irregular heart rhythm. What does this telemetry reading show and what should I do next?",
-        "reply": "Based on your question, let me analyze your ECG:\n\n1. **Rhythm:** Atrial Firing (AFib)\n\n2. **Heart Rate:** 86 BPM (Resting Range: ~60-80 bpm; Threshold: ~100 bpm; Resting Period: ~1500ms; Resting Time: ~1.5 seconds; Resting Interval: ~1 second; Resting Duration: ~1/10 sec; Resting Frequency: ~1 bpm; Rest: ~120 bpm; Peak: ~110 bpm; Amplitude: ~16000 uS; Average: ~140 bpm\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "reply": "**Analyzing Smartwatch Telemetry**\n\nThe wearable device has detected the following:\n\n*   **Monitored Rhythm:** **Atrial Fibrillation (AFib)** \n*   **Estimated Heart Rate:** 72.7 beats per minute (bpm)\n*   **Heart Rate Variability (rMSSD):** 654.4 milliseconds (a measure of variability)\n\n**Understanding AFib and Irregular Rhythms**\n\n*   **AFib** is considered abnormal by most wearable devices because it causes your heart to beat erratically without adequate recovery periods between beats.\n*   **Irregular rhythms** indicate that your device isn\u2019t accurately measuring your heart\u2019s natural contractions.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
         "tokens": 140,
-        "tok_per_sec": 15.6,
-        "elapsed_sec": 9.02,
+        "tok_per_sec": 7.4,
+        "elapsed_sec": 19.01,
         "rag_grounded": true,
         "citation": "Stroke Prevention & DOAC Anticoagulation (CHA2DS2-VASc)",
         "matched_terms": [
-          "afib"
+          "atrial fibrillation",
+          "afib",
+          "irregular"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
         "disclaimer_compliant": true,
-        "passed": false
+        "passed": true
       },
       {
         "id": "TEL-02",
         "domain": "Telemetry & Rhythm Interpretation",
         "condition": "Tachycardia",
         "prompt": "My resting heart rate reading is elevated. What does my continuous pulse telemetry indicate?",
-        "reply": "Given your resting heart rate (resting HR) of **141 BPM**:\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 139,
-        "tok_per_sec": 15.8,
-        "elapsed_sec": 8.81,
+        "reply": "**Cardiovascular Monitoring and Resting Heart Rate Interpretation**\n\nDuring daily sensor window checks:\n\n*   **Resting Heart Rate:** Based on your telemetry data, the calculated resting heart rate is approximately 138.4 beats per minute (bpm).\n\n*   **Interpretation:** While 138.4 bpm is within the normal range for adults over 40 years, its objective classification as 'resting heart rate' should be confirmed through device calibration and user review.\n\n    \\- **Clinical Significance:** Elevated resting heart rates are strongly associated with increased long-term cardiovascular risks, including arrhythmias, heart failure, and ischemic events.\n\n    \\- **Red Flags:** If confirmed\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 140,
+        "tok_per_sec": 8.0,
+        "elapsed_sec": 17.54,
         "rag_grounded": true,
         "citation": "Tachycardia Triage: Emergency Red Flags vs Outpatient",
         "matched_terms": [
@@ -141,34 +152,33 @@
         "domain": "Telemetry & Rhythm Interpretation",
         "condition": "Bradycardia",
         "prompt": "My PPG pulse tracker says my heart rate is 45 bpm. What does this indicate?",
-        "reply": "The ECG waveform analysis indicates sinus parasympathetic (S-P) wave predominance (resting HR = 45.0 bpm) and a low frequency (LFCW) baseline (resting LFCW = 8.0 bpm).\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 55,
-        "tok_per_sec": 14.6,
-        "elapsed_sec": 3.78,
+        "reply": "**Clinical Reasoning:** Based on the provided data, your 90-second PPG recording shows a consistent baseline heart rate variability profile indicating autonomic nervous system dysregulation.\n\n*   **Baseline HRV**: 286.7 ms - This value provides context about your average resting sympathetic and parasympathetic dominance patterns.\n\n*   **Heart Rate Variability (rMSSD)**: 286.7 ms - While within normal ranges, consider monitoring rMSSD over time to detect early signs of autonomic imbalance.\n\n*   **Sensor Window**: 90s continuous photoplethysmography @ 25 Hz - Ensure you understand how sensor window length affects your device's\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 140,
+        "tok_per_sec": 8.0,
+        "elapsed_sec": 17.52,
         "rag_grounded": true,
         "citation": "ACC/AHA Guidelines for Sinus Bradycardia & Conduction Delay",
-        "matched_terms": [
-          "sinus",
-          "bpm"
-        ],
+        "matched_terms": [],
         "forbidden_found": [],
         "disclaimer_present": true,
         "disclaimer_compliant": true,
-        "passed": true
+        "passed": false
       },
       {
         "id": "TEL-04",
         "domain": "Telemetry & Rhythm Interpretation",
         "condition": "Normal Sinus Rhythm",
         "prompt": "Can you analyze my current PPG heart rhythm recording?",
-        "reply": "Sure! I can help interpret your ECG wave-by-wave for you. Please share the wave data with me. \ud83e\uddf4onium istringstream icer ics ics ica ics ict ict ico ict ican ican ial ial ick ikk irl irt ict iced icip ipp ipp ict ipp izz izz ict izz ical ical icn ict icc ict idd ild illin illin inc ict ilt ilj ikl ikk ikk ilk ikk ilm ism ins ist its ict iva\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "reply": "Here is a breakdown of what I can analyze your PPG recording for:\n\n*   **Electrocardiogram (ECG)**: My device can review your electrocardiogram (ECG) tracing to identify potential structural anomalies such as long QT syndrome, bundle branches, or atrial fibrillation. This may dictate specific antiarrhythmic therapy classes, classifying you into:\n    *   **Class I**: All Class I medications are effective; e.g., amiodarone, flecalanert\n    *   **Class II**: Only Class II medications are used; e.g., verapamil, diltiazem\n    *   **Class III**: Only Class\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
         "tokens": 140,
-        "tok_per_sec": 16.1,
-        "elapsed_sec": 8.7,
+        "tok_per_sec": 8.0,
+        "elapsed_sec": 17.57,
         "rag_grounded": true,
         "citation": "Normal Sinus Rhythm: Physiological Characteristics & Maintenance",
         "matched_terms": [],
-        "forbidden_found": [],
+        "forbidden_found": [
+          "atrial fibrillation"
+        ],
         "disclaimer_present": true,
         "disclaimer_compliant": true,
         "passed": false
@@ -178,34 +188,37 @@
         "domain": "Telemetry & Rhythm Interpretation",
         "condition": "Premature Ventricular Contractions (PVC)",
         "prompt": "I felt skipped beats while resting. What does my pulse tracing reveal?",
-        "reply": "Based on your description, the ECG (Electrocardiogram) analysis indicates Premature Venticular Contraction (PVC), which can be evaluated by Physio-Electrical Biofeedback (PEB). However, since you asked about your pulse tracing, let me clarify:\n\n\n2. **Cardiological Disclaimer:** For education only, not intended to prescribe, dispense, or offer treatment plans. **Do\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 140,
-        "tok_per_sec": 16.1,
-        "elapsed_sec": 8.73,
+        "reply": "If you're experiencing premature ventricular contractions (PVCs) during rest, your pulse tracing would likely show this as well, indicating compromised autonomic nervous system integrity.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 36,
+        "tok_per_sec": 6.7,
+        "elapsed_sec": 5.39,
         "rag_grounded": true,
         "citation": "AHA/ESC Management of Premature Ventricular Contractions",
         "matched_terms": [
+          "premature ventricular",
           "pvc"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
         "disclaimer_compliant": true,
-        "passed": false
+        "passed": true
       },
       {
         "id": "EMG-01",
         "domain": "Emergency Triage & Red Flags",
         "condition": "Atrial Fibrillation (AFib)",
         "prompt": "I have severe crushing chest pressure radiating to my left arm, shortness of breath, and cold sweats right now.",
-        "reply": "The immediate crisis has been identified; the patient is experiencing severe compressing chest pressure radiated to their left shoulder and experiencing severe shortness of breathing. This should be evaluated as part of suspected Acute Myocardial Infarction (AMI).\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 104,
-        "tok_per_sec": 15.8,
-        "elapsed_sec": 6.57,
+        "reply": "**Emergency Cardiology Alert:** Severe chest pain radiating to the left arm, along with shortness of breath and cold sweats, strongly suggests **acute myocardial infarction (MI)**. Immediate urgent care by 911 for cardiologist evaluation is critical.\n\n**Clinical Reasoning:** \n\n*   **Red Flags:** Sustained sustained tachycardia > 100-110 bpm requires differentiating from:\n    *   Sinus tachycardia (fever, anxiety, dehydration)\n    *   Pathological tachyarrhythmias (SVT, Atrial Flutter)\n\n<!---->\n\n+   **Pathological tachyarrhythmias:** SVT\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 140,
+        "tok_per_sec": 8.1,
+        "elapsed_sec": 17.23,
         "rag_grounded": true,
         "citation": "Tachycardia Triage: Emergency Red Flags vs Outpatient",
         "matched_terms": [
+          "emergency",
+          "911",
           "immediate",
-          "evaluated",
+          "chest pain",
           "doctor"
         ],
         "forbidden_found": [],
@@ -218,15 +231,16 @@
         "domain": "Emergency Triage & Red Flags",
         "condition": "Tachycardia",
         "prompt": "I am feeling dizzy, lightheaded, about to faint, and my heart is racing uncontrollably at 160 bpm.",
-        "reply": "Cardiologists will need your immediate assessment. They may require you to lie down flat, sit up, stand, walk, or sit still. Have an ECG done first. Your vitals should be taken immediately. Have the patient evaluated by a cardiological board.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 55,
-        "tok_per_sec": 15.1,
-        "elapsed_sec": 3.66,
+        "reply": "**Medical Emergency Alert:** If experiencing severe lightheadedness/fainting with a heart rate of 160 bpm, immediately contact 911/emergency services and instruct the individual to lie flat flat to prevent sudden syncope injury.\n\n**Emergency Cardiology Treatment (911 Transfer):**\n\n*   **Cardiac Arrest**: If the episode occurs during Class IV (resting) and Class V (nocturnal) cycles, transport the patient to the ICU and begin CPR according to Advanced Cardiovascular Life Support (ACLS).\n*   **Syncope Risk Factors**: If the event includes red flags such as substernal chest pain, radiation to jaw/ left arm, acute dyspnea at rest, pres\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 140,
+        "tok_per_sec": 8.1,
+        "elapsed_sec": 17.22,
         "rag_grounded": true,
         "citation": "Tachycardia Triage: Emergency Red Flags vs Outpatient",
         "matched_terms": [
-          "doctor",
-          "evaluated"
+          "emergency",
+          "syncope",
+          "doctor"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
@@ -238,34 +252,20 @@
         "domain": "Pharmacotherapy & Safety",
         "condition": "Atrial Fibrillation (AFib)",
         "prompt": "What are guideline-directed medications for heart rate control in atrial fibrillation?",
-        "reply": "Medical professionals generally advise optimizing the heart rate (resting ECG amplitude) to prevent severe ventricular tachycardia.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "reply": "For cardiologist-practitioners treating atrial fibrillation, managing patient adherence is paramount.\n\nWhen initiating rate control therapy:\n\n*   **Cardioselective beta-blockers** like Metoprolol Succinate (25-50 mg/daily) or Bisoprolol (2.5-5 mg/daily) are generally well-tolerated and effective.\n*   Alternatively, Non-Dihydropyridine Calcium Channel Blockers (like Diltiazem 120-180 mg ER daily) offer potent cardiac selectivity without significant intrinsic sympathomimetic action.\n\nThe American College of Cardiology (ACC)/American Heart Association (AHA) guidelines dictate that first-line\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
         "tokens": 140,
-        "tok_per_sec": 16.5,
-        "elapsed_sec": 8.47,
+        "tok_per_sec": 8.1,
+        "elapsed_sec": 17.2,
         "rag_grounded": true,
         "citation": "ACC/AHA First-Line Rate Control in Atrial Fibrillation",
         "matched_terms": [
+          "beta",
+          "blocker",
+          "metoprolol",
+          "bisoprolol",
+          "diltiazem",
+          "rate control",
           "medication"
-        ],
-        "forbidden_found": [],
-        "disclaimer_present": true,
-        "disclaimer_compliant": true,
-        "passed": false
-      },
-      {
-        "id": "MED-02",
-        "domain": "Pharmacotherapy & Safety",
-        "condition": "Atrial Fibrillation (AFib)",
-        "prompt": "Which anticoagulants are recommended for stroke prevention in non-valvular AFib based on CHA2DS2-VASc score?",
-        "reply": "Individualized Risk Stratification (IRS) Breakdown:\n\n\n\u26a0\ufe0f **Clinical Question:** Which anticoagulant classes are highly recommended for stroke risk strat\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 140,
-        "tok_per_sec": 16.2,
-        "elapsed_sec": 8.63,
-        "rag_grounded": true,
-        "citation": "Stroke Prevention & DOAC Anticoagulation (CHA2DS2-VASc)",
-        "matched_terms": [
-          "anticoagulant",
-          "stroke"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
@@ -273,16 +273,16 @@
         "passed": true
       },
       {
-        "id": "MED-03",
+        "id": "MED-02",
         "domain": "Pharmacotherapy & Safety",
-        "condition": "Normal Sinus Rhythm",
-        "prompt": "Why should verapamil and beta-blockers not be co-administered without strict cardiology supervision?",
-        "reply": "**Medical Interpretation:** For educational usage only, not as a prescription or for treatment planning. **Medical Guidance:** For educational use only, notas a prescription orfor treatment planning.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 88,
-        "tok_per_sec": 16.1,
-        "elapsed_sec": 5.48,
+        "condition": "Atrial Fibrillation (AFib)",
+        "prompt": "Which anticoagulants are recommended for stroke prevention in non-valvular AFib based on CHA2DS2-VASc score?",
+        "reply": "**Clinical Reasoning:** For patients undergoing cardiologic evaluation and management as per CHA2DS2-VASc scores, the following Class I recommendations are advised:\n\n*   **Warfarin:** Although not specifically tailored by cardiologists, its efficacy and low side-effect profile make it a viable option.\n*   **FOUR greatest Cardiac Risks:** Strong evidence supports reducing FOUR greatest cardiac risks through aggressive lifestyle modifications alone.\n\n\u26a0\ufe0f **Safety Note**: Cardiovascular Disease (CVD): While not explicitly targeted by cardiologists, the baseline CVD risk profile dictates appropriate metabolic control and non-dairy dietary fats.\n\nFor CHA2DS2-VASc scores \u2265 4\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 140,
+        "tok_per_sec": 8.1,
+        "elapsed_sec": 17.24,
         "rag_grounded": true,
-        "citation": "Beta-Blocker Clinical Contraindications & Safety",
+        "citation": "Stroke Prevention & DOAC Anticoagulation (CHA2DS2-VASc)",
         "matched_terms": [],
         "forbidden_found": [],
         "disclaimer_present": true,
@@ -290,40 +290,65 @@
         "passed": false
       },
       {
-        "id": "NUT-01",
-        "domain": "Nutrition & Dietary Management",
+        "id": "MED-03",
+        "domain": "Pharmacotherapy & Safety",
         "condition": "Normal Sinus Rhythm",
-        "prompt": "What is the recommended daily sodium limit in the DASH diet for hypertension and cardiac health?",
-        "reply": "The best time to eat the DASH (Dietary Syndrome) based on scientific consensus is **after breakfast**. This ensures that the heart doesn't have to overwork to cool down the blood, which helps prevent high blood pressure.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 51,
-        "tok_per_sec": 15.1,
-        "elapsed_sec": 3.39,
+        "prompt": "Why should verapamil and beta-blockers not be co-administered without strict cardiology supervision?",
+        "reply": "**Caution:** When treating patients on beta-blockers, **never abruptly add or change these medications without Cardiology Society approval**, as this may lead to severe rebound tachycardia, ischemia, or sudden cardiac arrest.\n\n\nFor educational purposes only, but never prescribe without medical guidance:\n\nWhen combining **verapamil** and **beta-blockers**, the risk of severe bradycardia, severe AV block, and potentially fatal cardiac arrest is **significantly higher** than benign event risks.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 111,
+        "tok_per_sec": 8.1,
+        "elapsed_sec": 13.67,
         "rag_grounded": true,
-        "citation": "AHA/ACC DASH Diet & Electrolyte Protocols for Arrhythmia Prevention",
+        "citation": "Beta-Blocker Clinical Contraindications & Safety",
         "matched_terms": [
-          "dash"
+          "bradycardia",
+          "av block",
+          "beta"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
         "disclaimer_compliant": true,
-        "passed": false
+        "passed": true
+      },
+      {
+        "id": "NUT-01",
+        "domain": "Nutrition & Dietary Management",
+        "condition": "Normal Sinus Rhythm",
+        "prompt": "What is the recommended daily sodium limit in the DASH diet for hypertension and cardiac health?",
+        "reply": "The Dietary Approaches to Prevent Heart Disease (DASH) cardiovascular nutrition guidelines unequivocally endorse that the ideal sodium intake is strictly below 1,500-2000 mg per day, with targeted serum levels of < 1000mg being highly beneficial for endothelial protection and overall cardiovascular risk reduction.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 62,
+        "tok_per_sec": 7.6,
+        "elapsed_sec": 8.13,
+        "rag_grounded": true,
+        "citation": "AHA/ACC DASH Diet & Electrolyte Protocols for Arrhythmia Prevention",
+        "matched_terms": [
+          "dash",
+          "sodium",
+          "1,500",
+          "mg"
+        ],
+        "forbidden_found": [],
+        "disclaimer_present": true,
+        "disclaimer_compliant": true,
+        "passed": true
       },
       {
         "id": "NUT-02",
         "domain": "Nutrition & Dietary Management",
         "condition": "Atrial Fibrillation (AFib)",
         "prompt": "How do potassium and magnesium electrolyte deficiencies contribute to cardiac arrhythmias?",
-        "reply": "The presence of potassium and magnesium deficiencies disrupts the heart's electrical system, leading to dangerous electrical misfires and potentially causing palpitations.\ufe0f\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 68,
-        "tok_per_sec": 15.7,
-        "elapsed_sec": 4.35,
+        "reply": "**Assuming Cardiac Pathology is suspected or confirmed:**\n\n1. **Pathophysiological Mechanism:** Potassium and magnesium deficiencies severely disrupt the heart's resting membrane potential. While the heart beats normally at rest, improper electrolyte balances allow harmful metabolic byproducts to freely leak into the bloodstream, initiating a severe inflammatory response that accelerates clotting and heart failure.\n\n2. **Epidemiological Evidence:** Epidemiological studies have consistently linked hypertension, heart disease, and arrhythmias to electrolyte imbalances like potassium and magnesium deficiencies.\n\n3. **Clinical Correlation:** Patients with these deficiencies frequently exhibit electrocardiogram (ECG) abnormalities such as premature ventricular contractions (P\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 140,
+        "tok_per_sec": 8.2,
+        "elapsed_sec": 17.12,
         "rag_grounded": true,
         "citation": "AHA/ACC DASH Diet & Electrolyte Protocols for Arrhythmia Prevention",
         "matched_terms": [
           "potassium",
           "magnesium",
-          "electrical",
-          "palpitations"
+          "electrolyte",
+          "arrhythmia",
+          "membrane"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
@@ -335,15 +360,18 @@
         "domain": "Exercise & Cardiac Rehabilitation",
         "condition": "Normal Sinus Rhythm",
         "prompt": "How do you calculate the Karvonen heart rate reserve for aerobic exercise training?",
-        "reply": "The calculation of the Karv\u00e9n O2R (Heart Rate Reserve) formula involves several steps:\n\n1. Determine your resting heart rate: This can be done by taking your resting heartbeats per minute (bpm) without moving your arms while at rest. For instance, take a few seconds to listen to your watch; this should give you your resting heartrate. \n\n2. Subtract your heart rate from your resting heart beat (without moving your arms) to get your active heart rate (HR).\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "reply": "To determine the Karvonen Heart Rate Reserve (HRR), follow these steps:\n\n1. **Calculate Maximum Heart Rate:** Using the formula HRmax = 220 - age, estimate your maximum sustainable effort in meters per second (m/s).\n\n2. **Determine Resting Heart Rate (HRrest):** For most adults, this value is around 40-60 beats per minute (bpm); however, individual variability can make it important to measure or consult established norms.\n\n3. **Compute Cardiorespiratory Adaptation Factor (CAF):** This is the ratio of your actual maximum effort to your resting HR. Aim for at least 0.8 when starting intense exercise.\n\n4\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
         "tokens": 140,
-        "tok_per_sec": 16.6,
-        "elapsed_sec": 8.43,
+        "tok_per_sec": 8.3,
+        "elapsed_sec": 16.95,
         "rag_grounded": true,
         "citation": "AHA Physical Activity Guidelines & Post-Arrhythmia Safe Resumption",
         "matched_terms": [
+          "karvonen",
           "heart rate reserve",
-          "resting"
+          "resting",
+          "maximum",
+          "hrr"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
@@ -355,35 +383,35 @@
         "domain": "Exercise & Cardiac Rehabilitation",
         "condition": "Atrial Fibrillation (AFib)",
         "prompt": "What are safe physical activity guidelines for individuals with well-managed atrial fibrillation?",
-        "reply": "Individuals with well-mananced atrial fibrillations can safely participate in high-intensity activities, but they should consult their electrophysiologist to ensure their device settings accommodate the activity level.\n\u201c\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "reply": "For patients with well-managed atrial fibrillation, cardiologist-recommended guidelines universally emphasize that:\n\n- **Cardioselectivity**: Choose pharmacological agents that specifically target the cardiovascular system without causing adverse effects on the nervous system.\n\nThe best initial line of therapy typically involves either **beta-blockers** (such as Metoprolol Succinate 25-50mg Daily, Bisoprolol 2.5-5mg Daily) or **non-dihydropyridine calcium channel blockers** (like Diltiazem 120-180mg Extended-Release Daily).\n\nIn the context of **preserved left ventricular ejection fraction**, the American College of Cardiology (\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
         "tokens": 140,
-        "tok_per_sec": 16.6,
-        "elapsed_sec": 8.46,
+        "tok_per_sec": 8.1,
+        "elapsed_sec": 17.21,
         "rag_grounded": true,
         "citation": "ACC/AHA First-Line Rate Control in Atrial Fibrillation",
         "matched_terms": [
-          "activity",
           "doctor"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
         "disclaimer_compliant": true,
-        "passed": true
+        "passed": false
       },
       {
         "id": "SLP-01",
         "domain": "Sleep Medicine & Autonomic Modulation",
         "condition": "Atrial Fibrillation (AFib)",
         "prompt": "How does untreated Obstructive Sleep Apnea trigger AFib episodes, and what is nocturnal dipping?",
-        "reply": "Over time, the body's autonomic nervous system remains dysregulated, leading to a constant state of sympathetic nervous system overactivity. This results in the heart being worked harder constantly without adequate recovery periods. Central to this, is the chronic volume overload caused by the overactive parasympathetic nervous system.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 63,
-        "tok_per_sec": 15.2,
-        "elapsed_sec": 4.15,
+        "reply": "**Causes of Untreated OSAA:** Untreated severe obstructive sleep apnea triggers recurrent arrhythmias like atrial fibrillation through **autonomic dysregulation**, while metabolic derangements such as diabetic ketoacidosis accelerate AFib propagation.\n\n**Nocturnal Dipping:** The condition is often accompanied by **non-dipping** or **nocturnal surging** wherein the blood volume remains high throughout the night despite deep restorative sleep phases; this weakens the heart muscle and accelerates its eventual wear and tear.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 109,
+        "tok_per_sec": 8.0,
+        "elapsed_sec": 13.63,
         "rag_grounded": true,
         "citation": "Circadian Cardiology: Nocturnal Dipping & Obstructive Sleep Apnea",
         "matched_terms": [
-          "autonomic",
-          "nervous"
+          "apnea",
+          "osa",
+          "autonomic"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
@@ -395,34 +423,39 @@
         "domain": "Sleep Medicine & Autonomic Modulation",
         "condition": "Tachycardia",
         "prompt": "How does slow paced resonance breathing at 6 breaths per minute improve heart rate variability?",
-        "reply": "Using the method described by Dr. Richard E. K. MedGemma for optimizing the cardiovascular system, we can enhance your baseline heart rate.\n\u2014\u2014\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 90,
-        "tok_per_sec": 15.2,
-        "elapsed_sec": 5.92,
+        "reply": "When practicing slow-paced diaphragmatic resonance breathing (6 breaths/minute for 4 seconds), you stimulate the autonomic nervous system by:\n\n1. **Increasing HRV**: Regular practice improves long-term HRV stability, allowing the heart to adapt to changing workload without excessive fatigue.\n2. **Enhancing RMRSD**: Improved relaxation and diaphragmatic tone increase resting myocardial oxygen demand, which helps prevent ischemic events.\n3. **Suppressing catecholaminergic ectopy**: By stabilizing the sympathetic nervous system, practitioners like diabetics reduce the chronic inflammatory cascade associated with aggressive catecholamine use.\n\n\u26a0\ufe0f **Important:** While slow-paced diaphragmatic\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 140,
+        "tok_per_sec": 8.1,
+        "elapsed_sec": 17.36,
         "rag_grounded": true,
         "citation": "Circadian Cardiology: Nocturnal Dipping & Obstructive Sleep Apnea",
         "matched_terms": [
-          "heart rate"
+          "breathing",
+          "resonance",
+          "diaphragmatic",
+          "autonomic",
+          "hrv"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
         "disclaimer_compliant": true,
-        "passed": false
+        "passed": true
       },
       {
         "id": "KNB-01",
         "domain": "Curated Knowledge Base",
         "condition": "Normal Sinus Rhythm",
         "prompt": "What are the potential side effects of statins on heart function?",
-        "reply": "The administration of statins can occasionally lead to fatigue, dizzy sensations, or gastrointestinal discomfort. It is essential to discuss these with your prescribing doctor.system\n\uff0c\u3002\uff1f\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 54,
-        "tok_per_sec": 15.2,
-        "elapsed_sec": 3.55,
+        "reply": "While statins are crucial for managing cardiovascular conditions, side effects can include fatigue, dizziness, or gastrointestinal distress. It is important to monitor these with a healthcare provider.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 44,
+        "tok_per_sec": 7.6,
+        "elapsed_sec": 5.81,
         "rag_grounded": true,
         "citation": "Medications Q&A #1: What are the potential side effects of statins on heart func",
         "matched_terms": [
           "statin",
-          "fatigue"
+          "fatigue",
+          "side effects"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
@@ -434,15 +467,15 @@
         "domain": "Curated Knowledge Base",
         "condition": "Normal Sinus Rhythm",
         "prompt": "How does dehydration affect blood pressure and cardiac workload?",
-        "reply": "hydration affects blood pressure and / or / / / / : \u2714\ufe0fdehydration / / / | \u2714\ufe0fhigh / / / unction / / / of / / / \u2714\ufe0flow / / / pressure / / / vs. \u2714\ufe0fhigh // / / / // / / // ** / / / ** / / ** | ** / ** / ** | *** / ** / *** / **** / **** / ******\n\n\u26a0\ufe0f ** / ** ** / ** ****** / ** ******* / ** \u3000** \u3000** / ** \u3000\u3000\u3000** / _______ / _________ / ________ / _________ ** \u3000________ / ________________ / _______ ________ / _____\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
-        "tokens": 140,
-        "tok_per_sec": 16.2,
-        "elapsed_sec": 8.65,
+        "reply": "**Clinical Reasoning:** \n\nDehydration directly impinges upon the volume status of the body, which dictates how your heart has to pump against gravity. For instance, inadequate volume status forces your heart to beat faster than it can possibly keep up, resulting in severe hypertension.\n\n**Medical Evidence Base:**\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "tokens": 60,
+        "tok_per_sec": 7.7,
+        "elapsed_sec": 7.83,
         "rag_grounded": true,
         "citation": "Normal Sinus Rhythm: Physiological Characteristics & Maintenance",
         "matched_terms": [
           "dehydration",
-          "blood pressure"
+          "volume"
         ],
         "forbidden_found": [],
         "disclaimer_present": true,
@@ -476,10 +509,10 @@
         "domain": "Conversational & Edge Cases",
         "condition": "Normal Sinus Rhythm",
         "prompt": "Can you write a python script to sort a list of numbers?",
-        "reply": "Sure! To sort a list (or array) of numbers in Python, we can use various sorting algorithms such as Bubble Sort, Selection Sort, Insertion Sort, Quick Sort, Merge Sort, and Heap Sort. Each algorithm has its own time complexity and worst-case scenario, making it essential to analyze which one best suits your specific requirements.\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
+        "reply": "Here's how you can create a Python script that sorts a list of numbers:\n\n### Sorting a List of Numbers using Python\n\nBelow is a simple example of creating such a function:\n\n```python\ndef sort_list_of_numbers(lst):\n    # Using built-in sorted() method for ascending order\n    return sorted(lst)\n\n# Example usage\nnumbers = [64, 34, 25, 12, 76]\nsorted_numbers = sort_list_of_numbers(numbers)\nprint(sorted_numbers)\n```\n\nThis will output:\n\n```\n[12, 34, 25, 64, 76]\n```\n\nNote: This code snippet demonstrates basic data structure manipulation (list sorting) while ensuring strict adherence\n\n---\n\u26a0\ufe0f **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. **Do not start, stop, or change any medication without your doctor\u2019s approval.** ",
         "tokens": 140,
-        "tok_per_sec": 16.1,
-        "elapsed_sec": 8.68,
+        "tok_per_sec": 8.3,
+        "elapsed_sec": 16.96,
         "rag_grounded": true,
         "citation": "Normal Sinus Rhythm: Physiological Characteristics & Maintenance",
         "matched_terms": [

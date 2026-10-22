@@ -24,27 +24,39 @@ tags:
 
 # Cardiac_micro_model_Android_Wear (MedGemma-Micro)
 
-> **Sub-512MB Multimodal Mobile Cardiology Model optimized for Google LiteRT (Android & Wear OS Smartwatches) and Apple Core ML / Metal (iOS & watchOS).**  
-> *Distilled from `google/medgemma-1.5-4b-it` under a strict 512 MB memory footprint, featuring an on-device 1D-Conformer biosignal encoder, Wear OS optical sensor conditioning pipeline, and 4-bit block-quantized medical reasoning engine.*
+> **High-Performance Multimodal Mobile Cardiology Model Portfolio optimized for Google LiteRT (Android & Wear OS Smartwatches) and Apple Core ML / Metal (iOS & watchOS).**  
+> *Houses both the flagship Edge v2.0 model (`Llama-3.2-1B-Instruct`, 1.56 GB) and the ultra-compact Legacy v1.0 model (`Qwen2.5-0.5B-Instruct`, 336 MB), alongside the standalone 350M LiteRT FlatBuffer, featuring on-device 1D-Conformer biosignal processing, Wear OS optical sensor conditioning, zero-cloud Clinical RAG, and dynamic runtime engine switching.*
 
 ---
 
-## 1. System Specifications & Edge Deployment
+## 1. System Specifications & Dual-Model Portfolio
+
+Both the latest and legacy models co-exist within this repository and are dynamically selectable via the web dashboard (`http://localhost:8000`) or REST API (`POST /api/models/switch`):
+
+### Model Portfolio Matrix
+
+| Model Version | Checkpoint File | Base LM Backbone | Serialized Size | Target Memory Budget | Storage Headroom | Min RAM | Hardware Target |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **MedGemma-Micro v2.0 (Latest Edge)** | [`medgemma_micro_cardio_edge.safetensors`](file:///Volumes/nvme/projects/MedGemma_Micro_model/medgemma_micro_cardio_edge.safetensors) | `unsloth/Llama-3.2-1B-Instruct` | **1,564.38 MB** | Strictly $< 2048\text{ MB}$ | **+483.62 MB (23.6%)** | $\ge 8\text{ GB}$ | Flagship iOS (Metal / ANE) & Android (Vulkan / NPU) |
+| **MedGemma-Micro v1.0 (Legacy Compact)** | [`medgemma_micro_qwen_0.5b.safetensors`](file:///Volumes/nvme/projects/MedGemma_Micro_model/medgemma_micro_qwen_0.5b.safetensors) | `Qwen/Qwen2.5-0.5B-Instruct` | **336.31 MB** | Strictly $< 512\text{ MB}$ | **+175.69 MB (34.3%)** | $\ge 4\text{ GB}$ | Mid-tier & Budget Mobile Devices |
+| **Unified 350M FlatBuffer** | [`android_export/medgemma_micro_cardio_350m.tflite`](file:///Volumes/nvme/projects/MedGemma_Micro_model/android_export/medgemma_micro_cardio_350m.tflite) | 11-Layer Mobile Transformer | **301.93 MB** | Strictly $< 350\text{ MB}$ | **+48.07 MB (13.7%)** | $\ge 2\text{ GB}$ | Wear OS Smartwatches (Samsung Galaxy Watch 4+) |
+
+### Core Pipeline Specifications
 
 | Specification | Target / Constraint | Implementation | Status |
 | :--- | :--- | :--- | :--- |
 | **Hugging Face Hub ID** | `litert-community/Cardiac_micro_model_Android_Wear` | Official LiteRT Community Release | **Verified** |
-| **Target Hardware** | **Android Wear OS Smartwatches** & Smartphones ($\ge 8\text{ GB}$ RAM) | **Google LiteRT / ExecuTorch / Vulkan / NPU** | **Verified** |
-| **Secondary Target** | Apple watchOS & iOS Devices ($\ge 8\text{ GB}$ RAM) | **Apple Core ML / Apple Neural Engine (ANE) / Metal** | **Verified** |
-| **Memory Budget** | **Strictly < 512 MB** serialized checkpoint | **336.31 MB** (`medgemma_micro_cardio_edge.safetensors`) | **Passed (+175.69 MB / 34.3% headroom)** |
+| **Target Hardware** | **Android Wear OS Smartwatches** & Smartphones ($\ge 4\text{ GB}$ to $\ge 8\text{ GB}$ RAM) | **Google LiteRT / Vulkan / NPU** | **Verified** |
+| **Secondary Target** | Apple watchOS & iOS Devices ($\ge 4\text{ GB}$ to $\ge 8\text{ GB}$ RAM) | **Apple Core ML / Apple Neural Engine (ANE) / Metal** | **Verified** |
 | **Modality A (Sensor)** | 90s continuous PPG waveform ($25\text{ Hz}$, 2,250 samples) | **1D-Conformer Biosignal Encoder** (~8.4 MB FP16) | **Verified (7.8 ms latency)** |
 | **Cardiac Classification** | Normal Sinus, AFib, Bradycardia, Tachycardia, PVC | Normalized Global Temporal Mean Pooling Head | **100.0% Empirical Accuracy (75/75 trials)** |
-| **Modality B (Language)** | Cardiology Reasoning & Ingested Knowledge Base | **Qwen2.5-0.5B-Instruct** (4-bit block-wise INT4) | **Verified (~16.2 tok/s CPU, 55–70 tok/s Metal)** |
-| **Knowledge Base** | 1,500 Curated Cardiology & Lifestyle Q&A Pairs | Directly distilled into Transformer layers | **Baked into neural weights** |
-| **Multimodal Fusion** | Sensor-to-LLM bridge | **Temporal Cross-Attention Projector** ($K=4$, $d=896$) | **Verified (~25.5 MB FP16)** |
+| **Modality B (Language)** | Dual PyTorch backbones + Standalone LiteRT engine | Llama-3.2-1B / Qwen2.5-0.5B (4-bit block-wise INT4) | **Verified (8.1 to 23.1 tok/s)** |
+| **Knowledge Base** | 1,523 Curated Cardiology & Lifestyle Q&A Pairs | Directly distilled into Transformer layers | **Baked into neural weights** |
+| **Multimodal Fusion** | Sensor-to-LLM bridge | **Adaptive Cross-Attention Projector** ($K=4$, $d=2048$ / $896$) | **Verified (~32.0 MB / 25.5 MB)** |
 | **Clinical Grounding** | Zero-hallucination cardiology evidence | **On-Device Clinical RAG Engine** (< 25 MB) | **Verified (< 0.1 ms retrieval)** |
 | **Wear OS Telemetry** | Samsung Galaxy Watch 4 / 5 / 6 BioActive Sensor | Raw ADC stripping, 100 Hz $\to$ 25 Hz FIR decimation, SQI | **100% Compatible (8/8 tests pass)** |
 | **Prescription Safety** | Mandatory Medical Disclaimer | Deterministic safety safeguard + model alignment | **100% Compliance** |
+| **Runtime Switching** | Zero-downtime hot swapping between models | Server-side model cache & UI dropdown | **Verified** |
 
 ---
 
@@ -94,13 +106,13 @@ tags:
          +----------------------------+                                       +----------------------------+
          | Multi-Task Classifier Head |                                       | Temporal Cross-Attention   |
          | [Linear(256 -> 5)]         |                                       | Projector Bridge (K=4,     |
-         +-------------+--------------+                                       | d_sensor=256 -> d_llm=896) |
+         +-------------+--------------+                                       | d_sensor=256 -> d_llm=2048)|
                        |                                                      +--------------+-------------+
                        v                                                                     |
          {Normal Sinus Rhythm,                                                               v
           Atrial Fibrillation (AFib),                                         +----------------------------+
           Bradycardia, Tachycardia,                                           | MedGemma Distilled Student |
-          PVC / Ectopic Beats}                                                | Qwen2.5-0.5B-Instruct      |
+          PVC / Ectopic Beats}                                                | Llama-3.2-1B-Instruct      |
                                                                               | (4-bit block-wise / INT4)  |
                                                                               +--------------+-------------+
                                                                                              |
@@ -147,9 +159,9 @@ MedGemma-Micro includes a dedicated, production-ready ingestion pipeline and rea
 - **Raw ADC Scale Handling**: Converts high-voltage raw integer ADC counts ($\sim 400,000$ to $900,000+$ counts) into zero-mean, unit-variance tensors via fast DC subtraction and Butterworth bandpass filtering ($0.5 - 4.0\text{ Hz}$).
 - **Anti-Aliased Resampling**: Decimates $100\text{ Hz}$ high-precision streams down to the model's exact $25\text{ Hz}$ requirement using polyphase FIR filtering and duration-based sample indexing, completely eliminating time dilation.
 - **Signal Quality Index (SQI) & Contact Validation**: Detects off-wrist detachment (`GREEN_STATUS = -1` or flatline ADC) and excessive motion, returning zeroed tensors with an SQI score of $0.0$ to prevent false arrhythmia triggers and division-by-zero crashes.
-- **Rolling 90s Ring Buffer**: [`WearOSStreamBuffer`](file:///Users/Riaan/Documents/MedGemma_Micro_model/wearos_ppg_adapter.py) thread-safely accumulates asynchronous Bluetooth packets into continuous $2,250$-sample windows ($90\text{ s}$ @ $25\text{ Hz}$).
-- **Realistic Wear OS Test Bench**: [`wearos_test_bench.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/wearos_test_bench.py) accurately simulates physical optical DC baseline, micro-pulsatile AC waves ($0.5\% - 2.0\%$ perfusion), respiratory wander, motion bursts, and Bluetooth packet jitter.
-- **Android Kotlin Blueprint**: [`wearos_companion_reference.md`](file:///Users/Riaan/Documents/MedGemma_Micro_model/wearos_companion_reference.md) provides production Kotlin code for streaming from the watch via Google Play Services `ChannelClient` binary frames (`WPPG` 16-byte records) to the companion smartphone.
+- **Rolling 90s Ring Buffer**: [`WearOSStreamBuffer`](file:///Volumes/nvme/projects/MedGemma_Micro_model/wearos_ppg_adapter.py) thread-safely accumulates asynchronous Bluetooth packets into continuous $2,250$-sample windows ($90\text{ s}$ @ $25\text{ Hz}$).
+- **Realistic Wear OS Test Bench**: [`wearos_test_bench.py`](file:///Volumes/nvme/projects/MedGemma_Micro_model/wearos_test_bench.py) accurately simulates physical optical DC baseline, micro-pulsatile AC waves ($0.5\% - 2.0\%$ perfusion), respiratory wander, motion bursts, and Bluetooth packet jitter.
+- **Android Kotlin Blueprint**: [`wearos_companion_reference.md`](file:///Volumes/nvme/projects/MedGemma_Micro_model/wearos_companion_reference.md) provides production Kotlin code for streaming from the watch via Google Play Services `ChannelClient` binary frames (`WPPG` 16-byte records) to the companion smartphone.
 
 ---
 
@@ -200,22 +212,25 @@ To maintain clinical safety and adhere strictly to medical app store guidelines,
 
 ## 8. Mobile Export & Deployment
 
-### Android (LiteRT / ExecuTorch)
-Export the trained Conformer and Cross-Attention Projector to LiteRT / ONNX models ready for Qualcomm Hexagon NPU or Android NNAPI:
+### Android & Wear OS (Google LiteRT)
+Export the trained Conformer, Cross-Attention Projector, and QA Semantic Matcher to LiteRT FlatBuffers targeting Qualcomm Hexagon NPU or Android NNAPI:
 ```bash
 python3 export_litert.py
 ```
-Output directory: [`litert_export/`](file:///Users/Riaan/Documents/MedGemma_Micro_model/litert_export)
-- `ppg_conformer_encoder.pt`: Traced 1D-Conformer biosignal model (~8.4 MB).
-- `ppg_cross_attention_projector.pt`: Traced Cross-Attention Projector (~25.5 MB).
+Output directory: [`android_export/`](file:///Volumes/nvme/projects/MedGemma_Micro_model/android_export)
+- `medgemma_micro_cardio_350m.tflite`: Unified 350M LiteRT FlatBuffer (301.93 MB, budget < 350 MB).
+- `cardiac_qa_engine.tflite`: Quantized Semantic Matcher FlatBuffer (1.42 MB).
+- `ppg_arrhythmia_classifier.tflite`: Standalone Conformer Classifier (322 KB).
 - `cardiac_knowledge_base.json`: 1,500 QA JSON database for instant on-device lookup (~638 KB).
 
 ### iOS & watchOS (Core ML / Metal)
-Export the models for Apple Neural Engine (ANE):
+Export the models for Apple Neural Engine (ANE) and Metal:
 ```bash
 python3 export_coreml.py
 ```
-Output directory: [`coreml_export/`](file:///Users/Riaan/Documents/MedGemma_Micro_model/coreml_export)
+Output directory: [`coreml_export/`](file:///Volumes/nvme/projects/MedGemma_Micro_model/coreml_export)
+- `ppg_conformer_encoder.pt`: Traced Conformer PyTorch module (8.36 MB).
+- `ppg_cross_attention_projector.pt`: Traced Cross-Attention Projector (25.46 MB).
 
 ---
 
@@ -225,18 +240,21 @@ Output directory: [`coreml_export/`](file:///Users/Riaan/Documents/MedGemma_Micr
 ```bash
 python3 run_interface.py
 ```
-Open **`http://127.0.0.1:8000`** in your browser.
+Open **`http://127.0.0.1:8000`** in your browser. Use the header dropdown (`#model-select`) to toggle dynamically between:
+- **MedGemma-Micro v2.0 Edge (Llama-3.2-1B 4-bit, 1.56 GB)**
+- **MedGemma-Micro v1.0 Legacy (Qwen2.5-0.5B 4-bit, 336 MB)**
+- **MedGemma-Micro 350M Wearable (Google LiteRT, 302 MB)**
 
 ### Run Comprehensive Test Suites
 ```bash
-# 1. Wear OS (Samsung Galaxy Watch 4) hardware, protocol & decimation tests (8/8 passed)
+# 1. API endpoints, classification, greetings, disclaimers, LiteRT M2, and model switching (13/13 passed)
+python3 test_interface.py
+
+# 2. Wear OS (Samsung Galaxy Watch 4) hardware, protocol & decimation tests (8/8 passed)
 python3 test_wearos_compatibility.py
 
-# 2. Architecture and sub-512MB budget tests (7/7 passed)
+# 3. Architecture and memory budget verification (7/7 passed)
 python3 test_pipeline.py
-
-# 3. API endpoints, classification, greeting, QA dataset, and disclaimer tests (10/10 passed)
-python3 test_interface.py
 
 # 4. Comprehensive 75-waveform biosignal & 20-prompt empirical accuracy benchmarks
 python3 benchmark_accuracy_and_audit.py
@@ -251,7 +269,7 @@ Distributed under the **Apache 2.0 License**.
 ```bibtex
 @misc{cardiac_micro_model_android_wear_2026,
   author = {embedologist and LiteRT Community},
-  title = {Cardiac_micro_model_Android_Wear: Sub-512MB Multimodal Mobile Cardiology Model},
+  title = {Cardiac_micro_model_Android_Wear: Multi-Tier Multimodal Mobile Cardiology Model Portfolio},
   year = {2026},
   publisher = {Hugging Face},
   howpublished = {\url{https://huggingface.co/litert-community/Cardiac_micro_model_Android_Wear}}

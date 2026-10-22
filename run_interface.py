@@ -16,11 +16,11 @@ if os.path.exists(venv_python) and os.path.realpath(sys.executable) != os.path.r
 import uvicorn
 
 if __name__ == "__main__":
-    port = 8000
-    host = "127.0.0.1"
+    port = int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "127.0.0.1")
     print("=" * 65)
     print(f"Starting MedGemma-Micro Interactive Test Interface")
-    print(f"Model: medgemma_micro_cardio_350m.tflite (MacBook M2 LiteRT)")
+    print(f"Model: medgemma_micro_cardio_edge.safetensors (Llama-3.2-1B Multimodal Edge)")
     print(f"URL: http://{host}:{port}")
     print("=" * 65)
     uvicorn.run("app:app", host=host, port=port, log_level="info", reload=False)

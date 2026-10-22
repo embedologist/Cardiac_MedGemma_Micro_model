@@ -58,8 +58,14 @@ from clinical_rag import clinical_rag_engine
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("medgemma-micro-api")
 
-CHECKPOINT_PATH = "medgemma_micro_qwen_0.5b.safetensors" if os.path.exists("medgemma_micro_qwen_0.5b.safetensors") else "medgemma_micro_cardio_edge.safetensors"
-STUDENT_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
+LLAMA_1B_CHECKPOINT = "medgemma_micro_cardio_edge.safetensors"
+LLAMA_1B_STUDENT_ID = "unsloth/Llama-3.2-1B-Instruct"
+
+QWEN_05B_CHECKPOINT = "medgemma_micro_qwen_0.5b.safetensors"
+QWEN_05B_STUDENT_ID = "Qwen/Qwen2.5-0.5B-Instruct"
+
+CHECKPOINT_PATH = LLAMA_1B_CHECKPOINT
+STUDENT_MODEL_ID = LLAMA_1B_STUDENT_ID
 
 # TFLite 350M Unified Model Assets
 ANDROID_DIR = "android_export" if os.path.exists("android_export") else "litert_export"
@@ -74,8 +80,8 @@ EXACT_DISCLAIMER = (
 
 app = FastAPI(
     title="MedGemma-Micro Mobile Cardiology API",
-    description="Sub-512MB Multimodal Cardiology Edge AI Model for iOS (Core ML) & Android (LiteRT / GGUF)",
-    version="3.0.0",
+    description="Sub-512MB / Sub-2048MB Multimodal Cardiology Edge AI Models for iOS (Core ML) & Android (LiteRT / GGUF)",
+    version="3.1.0",
 )
 
 app.add_middleware(
@@ -88,17 +94,21 @@ app.add_middleware(
 
 # Global model state
 state = {
-    "active_engine": "tflite_350m",  # Default to medgemma_micro_cardio_350m.tflite on MacBook M2
+    "active_engine": "pytorch_edge",  # "pytorch_edge" (Llama-1B v2.0), "pytorch_qwen_05b" (Qwen-0.5B v1.0), or "tflite_350m"
+    "active_pytorch_engine": "pytorch_edge",
     "model": None,
     "tokenizer": None,
     "simulator": PPGSimulator(sampling_rate=25, duration_sec=90),
     "device": "cpu",
     "checkpoint_size_mb": 0.0,
+    "budget_limit_mb": 2048.0,
     "is_loaded": False,
     "current_ppg": None,  # Holds latest generated [2250, 1] numpy array
     "current_condition": 0,
     "wearos_buffer": WearOSStreamBuffer(window_sec=90, target_fs=25),
     "wearos_simulator": WearOSPPGSimulator(sampling_rate=25),
+    # Cache for loaded PyTorch models (for zero-latency switching)
+    "loaded_pytorch_models": {},
     # Unified 350M TFLite Model State
     "tflite_path": TFLITE_350M_PATH,
     "tflite_size_mb": 0.0,
@@ -188,34 +198,55 @@ def load_tflite_350m_model() -> bool:
         return False
 
 
-def load_medgemma_micro_model():
-    """Initializes and loads the multimodal model weights (supporting 4-bit and INT8 checkpoints)."""
+def load_medgemma_micro_model(target_engine: str = "pytorch_edge") -> bool:
+    """
+    Initializes and loads PyTorch multimodal model weights:
+      - 'pytorch_edge' or 'pytorch_llama_1b': MedGemma-Micro v2.0 (Llama-3.2-1B-Instruct Backbone, 1,564.38 MB, <2048MB budget)
+      - 'pytorch_qwen_05b': MedGemma-Micro v1.0 (Qwen2.5-0.5B-Instruct Backbone, 336.31 MB, <512MB budget)
+    """
     global state, CHECKPOINT_PATH, STUDENT_MODEL_ID
-    logger.info("Initializing MedGemma-Micro mobile edge environment...")
-    device = "cpu"  # CPU provides rock-solid stability and fast execution for edge deployment
+    device = "cpu"
     state["device"] = device
 
-    if os.path.exists("medgemma_micro_qwen_0.5b.safetensors"):
-        CHECKPOINT_PATH = "medgemma_micro_qwen_0.5b.safetensors"
-    elif os.path.exists("medgemma_micro_cardio_edge.safetensors"):
-        CHECKPOINT_PATH = "medgemma_micro_cardio_edge.safetensors"
+    norm_target = "pytorch_qwen_05b" if target_engine == "pytorch_qwen_05b" else "pytorch_edge"
+
+    # Check cache first for instant switching
+    if norm_target in state.get("loaded_pytorch_models", {}):
+        cached = state["loaded_pytorch_models"][norm_target]
+        state["model"] = cached["model"]
+        state["tokenizer"] = cached["tokenizer"]
+        state["checkpoint_size_mb"] = cached["size_mb"]
+        state["budget_limit_mb"] = cached["budget_limit_mb"]
+        CHECKPOINT_PATH = cached["path"]
+        STUDENT_MODEL_ID = cached["student_id"]
+        state["active_pytorch_engine"] = norm_target
+        state["is_loaded"] = True
+        logger.info("Activated cached PyTorch model: %s (%s)", CHECKPOINT_PATH, STUDENT_MODEL_ID)
+        return True
+
+    if norm_target == "pytorch_qwen_05b":
+        target_path = QWEN_05B_CHECKPOINT
+        target_student_id = QWEN_05B_STUDENT_ID
+        budget_limit = 512.0
+        model_label = "MedGemma-Micro v1.0 (Qwen2.5-0.5B Sub-512MB Edge)"
     else:
-        logger.warning("No PyTorch checkpoint found, skipping PyTorch initialization.")
-        return
+        target_path = LLAMA_1B_CHECKPOINT
+        target_student_id = LLAMA_1B_STUDENT_ID
+        budget_limit = 2048.0
+        model_label = "MedGemma-Micro v2.0 (Llama-3.2-1B Multimodal Edge)"
 
-    # Read metadata if present
-    meta = {}
-    try:
-        with safetensors.safe_open(CHECKPOINT_PATH, framework="pt") as f:
-            meta = f.metadata() or {}
-    except Exception:
-        pass
+    if not os.path.exists(target_path):
+        logger.error("Checkpoint not found at '%s'", target_path)
+        return False
 
-    STUDENT_MODEL_ID = meta.get("student_backbone", STUDENT_MODEL_ID)
+    CHECKPOINT_PATH = target_path
+    STUDENT_MODEL_ID = target_student_id
+    state["budget_limit_mb"] = budget_limit
 
     file_size_bytes = os.path.getsize(CHECKPOINT_PATH)
-    state["checkpoint_size_mb"] = round(file_size_bytes / (1024 * 1024), 2)
-    logger.info("Checkpoint '%s' size: %.2f MB", CHECKPOINT_PATH, state["checkpoint_size_mb"])
+    size_mb = round(file_size_bytes / (1024 * 1024), 2)
+    state["checkpoint_size_mb"] = size_mb
+    logger.info("Initializing %s ['%s'] (%.2f MB)...", model_label, CHECKPOINT_PATH, size_mb)
 
     # 1. Load Tokenizer
     logger.info("Loading tokenizer '%s'...", STUDENT_MODEL_ID)
@@ -282,13 +313,29 @@ def load_medgemma_micro_model():
         else:
             clean_state_dict[k] = v.to(torch.float32).to(device) if v.is_floating_point() else v.to(device)
 
-    missing, unexpected = model.load_state_dict(clean_state_dict, strict=True)
+    # Handle tied embeddings for Llama architectures
+    if "student_lm.lm_head.weight" not in clean_state_dict and "student_lm.model.embed_tokens.weight" in clean_state_dict:
+        clean_state_dict["student_lm.lm_head.weight"] = clean_state_dict["student_lm.model.embed_tokens.weight"]
+
+    missing, unexpected = model.load_state_dict(clean_state_dict, strict=False)
     logger.info("Checkpoint loaded successfully. Missing: %d, Unexpected: %d", len(missing), len(unexpected))
     model.eval()
 
     state["model"] = model
     state["is_loaded"] = True
-    logger.info("PyTorch MedGemma-Micro ready for multimodal inference.")
+    state["active_pytorch_engine"] = norm_target
+
+    # Cache loaded model instance
+    state["loaded_pytorch_models"][norm_target] = {
+        "model": model,
+        "tokenizer": tokenizer,
+        "size_mb": size_mb,
+        "budget_limit_mb": budget_limit,
+        "path": CHECKPOINT_PATH,
+        "student_id": STUDENT_MODEL_ID,
+    }
+    logger.info("%s ready for multimodal inference.", model_label)
+    return True
 
 
 @app.on_event("startup")
@@ -300,19 +347,18 @@ def startup_event():
     state["current_ppg"] = sig
     state["current_condition"] = 0
 
-    # 2. Load TFLite Unified 350M Model first (Primary edge model for MacBook M2)
+    # 2. Load TFLite Unified 350M Model in background
     tflite_ok = load_tflite_350m_model()
-    if tflite_ok:
-        state["active_engine"] = "tflite_350m"
-        logger.info("Active engine set to: tflite_350m (medgemma_micro_cardio_350m.tflite)")
-    else:
-        state["active_engine"] = "pytorch_edge"
 
-    # 3. Load PyTorch model in background / sequence
+    # 3. Load PyTorch model (Primary newly trained Llama-3.2-1B multimodal edge model)
     try:
-        load_medgemma_micro_model()
+        load_medgemma_micro_model(target_engine="pytorch_edge")
+        state["active_engine"] = "pytorch_edge"
+        logger.info("Active engine set to: pytorch_edge (medgemma_micro_cardio_edge.safetensors)")
     except Exception as e:
         logger.warning("PyTorch model startup skipped or failed: %s", str(e))
+        if tflite_ok:
+            state["active_engine"] = "tflite_350m"
 
 
 # =====================================================================
@@ -320,7 +366,7 @@ def startup_event():
 # =====================================================================
 
 class SwitchModelRequest(BaseModel):
-    model_id: str = Field(..., description="Target model: 'tflite_350m' or 'pytorch_edge'")
+    model_id: str = Field(..., description="Target model: 'tflite_350m', 'pytorch_edge', 'pytorch_llama_1b', or 'pytorch_qwen_05b'")
 
 
 
@@ -433,38 +479,64 @@ def get_available_models():
     """Returns list of available edge models and the currently active engine."""
     models = []
 
-    # 1. Unified 350M TFLite Model
+    # 1. New Primary Model: Llama-3.2-1B Multimodal Edge (v2.0)
+    llama_size = round(os.path.getsize(LLAMA_1B_CHECKPOINT) / (1024 * 1024), 2) if os.path.exists(LLAMA_1B_CHECKPOINT) else 1564.38
+    is_llama_active = state["active_engine"] in ["pytorch_edge", "pytorch_llama_1b"]
+    models.append({
+        "id": "pytorch_edge",
+        "alt_id": "pytorch_llama_1b",
+        "name": os.path.basename(LLAMA_1B_CHECKPOINT),
+        "displayName": "MedGemma-Micro v2.0 (Llama-3.2-1B Multimodal Edge)",
+        "framework": "PyTorch + Transformers (Llama-3.2-1B)",
+        "size_mb": llama_size,
+        "budget_limit_mb": 2048.0,
+        "headroom_mb": round(2048.0 - llama_size, 2),
+        "is_loaded": "pytorch_edge" in state.get("loaded_pytorch_models", {}) or (is_llama_active and state["is_loaded"]),
+        "is_active": is_llama_active,
+        "hardware_acceleration": "Apple Silicon (PyTorch float32)",
+        "signatures": ["Forward: (input_ids, ppg_waveforms) -> logits"],
+        "description": "Primary v2.0 multimodal model: Llama-3.2-1B-Instruct distilled from google/medgemma-1.5-4b-it with 1D-Conformer biosignal encoder and temporal cross-attention bridge.",
+        "badge": "v2.0 Llama-3.2-1B (1,564 MB)",
+        "version": "2.0 (Latest)",
+    })
+
+    # 2. Legacy Ultra-Compact Model: Qwen2.5-0.5B Sub-512MB Edge (v1.0)
+    qwen_size = round(os.path.getsize(QWEN_05B_CHECKPOINT) / (1024 * 1024), 2) if os.path.exists(QWEN_05B_CHECKPOINT) else 336.31
+    is_qwen_active = state["active_engine"] == "pytorch_qwen_05b"
+    models.append({
+        "id": "pytorch_qwen_05b",
+        "name": os.path.basename(QWEN_05B_CHECKPOINT),
+        "displayName": "MedGemma-Micro v1.0 (Qwen2.5-0.5B Sub-512MB Edge)",
+        "framework": "PyTorch + Transformers (Qwen2.5-0.5B)",
+        "size_mb": qwen_size,
+        "budget_limit_mb": 512.0,
+        "headroom_mb": round(512.0 - qwen_size, 2),
+        "is_loaded": "pytorch_qwen_05b" in state.get("loaded_pytorch_models", {}) or (is_qwen_active and state["is_loaded"]),
+        "is_active": is_qwen_active,
+        "hardware_acceleration": "Apple Silicon (PyTorch float32)",
+        "signatures": ["Forward: (input_ids, ppg_waveforms) -> logits"],
+        "description": "Original v1.0 ultra-compact sub-512MB multimodal model: Qwen2.5-0.5B-Instruct with 4-bit per-group quantization and 1D-Conformer.",
+        "badge": "v1.0 Qwen2.5-0.5B (336 MB)",
+        "version": "1.0 (Legacy / Ultra-Compact)",
+    })
+
+    # 3. Unified 350M TFLite Model
+    tflite_size = state["tflite_size_mb"] or 301.93
     models.append({
         "id": "tflite_350m",
         "name": "medgemma_micro_cardio_350m.tflite",
-        "displayName": "Unified 350M Edge Model (LiteRT / TFLite)",
+        "displayName": "MedGemma-Micro Unified 350M (LiteRT / TFLite)",
         "framework": "TensorFlow Lite 2.21 (LiteRT)",
-        "size_mb": state["tflite_size_mb"] or 301.93,
+        "size_mb": tflite_size,
         "budget_limit_mb": 350.0,
-        "headroom_mb": round(350.0 - (state["tflite_size_mb"] or 301.93), 2),
+        "headroom_mb": round(350.0 - tflite_size, 2),
         "is_loaded": state["tflite_loaded"],
         "is_active": state["active_engine"] == "tflite_350m",
         "hardware_acceleration": "Apple Silicon M2 (XNNPACK CPU)",
         "signatures": ["serving_default: (ppg_waveform [1,2250,1], query_tokens [1,64]) -> (arrhythmia_probabilities [1,5], query_embedding [1,768])"],
         "description": "Unified 301.93 MB multi-signature edge model bundling 1D-Conformer PPG arrhythmia detection AND 11-layer Transformer Cardiology Expert.",
-        "badge": "MacBook M2 LiteRT",
-    })
-
-    # 2. PyTorch Checkpoint
-    models.append({
-        "id": "pytorch_edge",
-        "name": os.path.basename(CHECKPOINT_PATH),
-        "displayName": "MedGemma-Micro PyTorch Checkpoint",
-        "framework": "PyTorch + HuggingFace Transformers",
-        "size_mb": state["checkpoint_size_mb"],
-        "budget_limit_mb": 512.0,
-        "headroom_mb": round(512.0 - state["checkpoint_size_mb"], 2),
-        "is_loaded": state["is_loaded"],
-        "is_active": state["active_engine"] == "pytorch_edge",
-        "hardware_acceleration": "CPU (PyTorch float32)",
-        "signatures": ["Forward: (input_ids, ppg_waveform) -> logits"],
-        "description": "Distilled Qwen2.5-0.5B-Instruct causal LM with 1D-Conformer biosignal encoder and cross-attention projector.",
-        "badge": "PyTorch 4-bit",
+        "badge": "MacBook M2 LiteRT (302 MB)",
+        "version": "350M Unified FlatBuffer",
     })
 
     return {
@@ -476,10 +548,11 @@ def get_available_models():
 
 @app.post("/api/models/switch")
 def switch_model_engine(req: SwitchModelRequest):
-    """Dynamically switches active model between TFLite 350M and PyTorch Edge."""
+    """Dynamically switches active model between TFLite 350M, Llama-3.2-1B, and Qwen2.5-0.5B."""
     target = req.model_id.strip().lower()
-    if target not in ["tflite_350m", "pytorch_edge"]:
-        raise HTTPException(status_code=400, detail=f"Invalid model_id '{req.model_id}'. Choose 'tflite_350m' or 'pytorch_edge'.")
+    valid_targets = ["tflite_350m", "pytorch_edge", "pytorch_llama_1b", "pytorch_qwen_05b"]
+    if target not in valid_targets:
+        raise HTTPException(status_code=400, detail=f"Invalid model_id '{req.model_id}'. Choose from: {valid_targets}")
 
     if target == "tflite_350m":
         if not state["tflite_loaded"]:
@@ -488,29 +561,48 @@ def switch_model_engine(req: SwitchModelRequest):
                 raise HTTPException(status_code=500, detail="Failed to initialize medgemma_micro_cardio_350m.tflite.")
         state["active_engine"] = "tflite_350m"
         logger.info("Active model switched to: medgemma_micro_cardio_350m.tflite")
+        tflite_size = state["tflite_size_mb"] or 301.93
         return {
             "success": True,
             "active_engine": "tflite_350m",
             "model_name": "medgemma_micro_cardio_350m.tflite",
             "framework": "LiteRT / TensorFlow Lite",
-            "size_mb": state["tflite_size_mb"],
+            "size_mb": tflite_size,
+            "budget_limit_mb": 350.0,
+            "headroom_mb": round(350.0 - tflite_size, 2),
             "message": "Switched to medgemma_micro_cardio_350m.tflite (Apple Silicon M2 LiteRT)",
         }
-    else:
-        if not state["is_loaded"]:
-            try:
-                load_medgemma_micro_model()
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed to load PyTorch model: {str(e)}")
+    elif target in ["pytorch_edge", "pytorch_llama_1b"]:
+        ok = load_medgemma_micro_model(target_engine="pytorch_llama_1b")
+        if not ok:
+            raise HTTPException(status_code=500, detail=f"Failed to load {LLAMA_1B_CHECKPOINT}")
         state["active_engine"] = "pytorch_edge"
-        logger.info("Active model switched to: %s", os.path.basename(CHECKPOINT_PATH))
+        logger.info("Active model switched to: %s (Llama-3.2-1B v2.0)", os.path.basename(LLAMA_1B_CHECKPOINT))
         return {
             "success": True,
             "active_engine": "pytorch_edge",
-            "model_name": os.path.basename(CHECKPOINT_PATH),
-            "framework": "PyTorch + Transformers",
+            "model_name": os.path.basename(LLAMA_1B_CHECKPOINT),
+            "framework": "PyTorch + Transformers (Llama-3.2-1B)",
             "size_mb": state["checkpoint_size_mb"],
-            "message": f"Switched to {os.path.basename(CHECKPOINT_PATH)}",
+            "budget_limit_mb": 2048.0,
+            "headroom_mb": round(2048.0 - state["checkpoint_size_mb"], 2),
+            "message": f"Switched to {os.path.basename(LLAMA_1B_CHECKPOINT)} (Llama-3.2-1B Multimodal Edge v2.0)",
+        }
+    elif target == "pytorch_qwen_05b":
+        ok = load_medgemma_micro_model(target_engine="pytorch_qwen_05b")
+        if not ok:
+            raise HTTPException(status_code=500, detail=f"Failed to load {QWEN_05B_CHECKPOINT}")
+        state["active_engine"] = "pytorch_qwen_05b"
+        logger.info("Active model switched to: %s (Qwen2.5-0.5B v1.0)", os.path.basename(QWEN_05B_CHECKPOINT))
+        return {
+            "success": True,
+            "active_engine": "pytorch_qwen_05b",
+            "model_name": os.path.basename(QWEN_05B_CHECKPOINT),
+            "framework": "PyTorch + Transformers (Qwen2.5-0.5B)",
+            "size_mb": state["checkpoint_size_mb"],
+            "budget_limit_mb": 512.0,
+            "headroom_mb": round(512.0 - state["checkpoint_size_mb"], 2),
+            "message": f"Switched to {os.path.basename(QWEN_05B_CHECKPOINT)} (Qwen2.5-0.5B Sub-512MB Edge v1.0)",
         }
 
 
@@ -705,7 +797,10 @@ def run_tflite_benchmark():
 def get_status():
     """Returns runtime model status, size, and mobile edge budget telemetry."""
     active_engine = state["active_engine"]
-    is_ready = (active_engine == "tflite_350m" and state["tflite_loaded"]) or (active_engine == "pytorch_edge" and state["is_loaded"])
+    is_ready = (
+        (active_engine == "tflite_350m" and state["tflite_loaded"])
+        or (active_engine in ["pytorch_edge", "pytorch_llama_1b", "pytorch_qwen_05b"] and state["is_loaded"])
+    )
     if not is_ready:
         # Check if tflite can be loaded
         if active_engine == "tflite_350m" and not state["tflite_loaded"]:
@@ -736,23 +831,25 @@ def get_status():
             "min_device_ram": "4GB - 8GB",
         }
 
-    # Fallback to PyTorch status
+    # Fallback to PyTorch status (Llama-3.2-1B or Qwen2.5-0.5B)
     if not state["is_loaded"]:
         return JSONResponse(status_code=503, content={"status": "loading", "active_engine": active_engine})
 
     model = state["model"]
     total_params = sum(p.numel() for p in model.parameters()) if model else 0
+    budget_limit = 512.0 if active_engine == "pytorch_qwen_05b" else 2048.0
+    min_ram = "4GB - 8GB" if active_engine == "pytorch_qwen_05b" else "8GB"
 
     return {
         "status": "ready",
-        "active_engine": "pytorch_edge",
+        "active_engine": active_engine,
         "model_name": os.path.basename(CHECKPOINT_PATH),
         "checkpoint_path": CHECKPOINT_PATH,
         "size_mb": state["checkpoint_size_mb"],
-        "budget_limit_mb": 512.0,
-        "headroom_mb": round(512.0 - state["checkpoint_size_mb"], 2),
+        "budget_limit_mb": budget_limit,
+        "headroom_mb": round(budget_limit - state["checkpoint_size_mb"], 2),
         "total_parameters": total_params,
-        "framework": "PyTorch + HuggingFace Transformers",
+        "framework": f"PyTorch + HuggingFace Transformers ({STUDENT_MODEL_ID})",
         "student_backbone": STUDENT_MODEL_ID,
         "encoder_architecture": getattr(model, "encoder_type", "conformer") if model else "conformer",
         "projector_architecture": getattr(model, "projector_type", "cross_attention") if model else "cross_attention",
@@ -762,7 +859,7 @@ def get_status():
         "device": state["device"],
         "hardware": state["hardware_info"],
         "target_platforms": ["iOS (Core ML / Metal)", "Android (LiteRT / GGUF)"],
-        "min_device_ram": "8GB",
+        "min_device_ram": min_ram,
     }
 
 
@@ -998,7 +1095,12 @@ def classify_wearos_buffer():
     calib_idx, calib_probs, note = calibrate_rhythm_prediction(pred_raw, raw_probs, hemo)
 
     # Apply multi-reading consensus across consecutive 90s windows
-    consensus_pred, consensus_probs = buffer.push_reading_consensus(calib_probs)
+    if hasattr(buffer, "push_reading_consensus"):
+        consensus_pred, consensus_probs = buffer.push_reading_consensus(calib_probs)
+    elif hasattr(buffer, "consensus_filter"):
+        consensus_pred, consensus_probs, _ = buffer.consensus_filter.update(calib_idx, calib_probs)
+    else:
+        consensus_pred, consensus_probs = calib_idx, calib_probs
     pred_idx = consensus_pred
     state["current_condition"] = pred_idx
 
@@ -1093,7 +1195,7 @@ def chat(req: ChatRequest):
         load_tflite_350m_model()
     if active_engine == "tflite_350m" and not state["tflite_loaded"]:
         raise HTTPException(status_code=503, detail="medgemma_micro_cardio_350m.tflite is still initializing")
-    elif active_engine == "pytorch_edge" and not state["is_loaded"]:
+    elif active_engine in ["pytorch_edge", "pytorch_llama_1b", "pytorch_qwen_05b"] and not state["is_loaded"]:
         raise HTTPException(status_code=503, detail="PyTorch model is still initializing")
 
     # 1. Conversational Greeting Intelligence
@@ -1464,8 +1566,9 @@ def chat(req: ChatRequest):
 
     input_tokens = tokenizer(formatted_input, return_tensors="pt").to(device)
 
-    # Dynamic minimum token bound to prevent premature <|im_end|> termination in 0.5B student model
-    min_tokens = min(50, max(25, req.max_tokens - 40)) if req.max_tokens >= 80 else 15
+    # Dynamic minimum token bound
+    min_tokens = min(20, max(10, req.max_tokens - 40)) if req.max_tokens >= 80 else 10
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
 
     start_time = time.perf_counter()
     with torch.no_grad():
@@ -1474,10 +1577,10 @@ def chat(req: ChatRequest):
             max_new_tokens=req.max_tokens,
             min_new_tokens=min_tokens,
             do_sample=True,
-            temperature=min(0.4, max(0.2, req.temperature)),
-            pad_token_id=tokenizer.eos_token_id,
+            temperature=min(0.65, max(0.25, req.temperature)),
+            top_p=0.9,
+            pad_token_id=pad_id,
             repetition_penalty=1.12,
-            no_repeat_ngram_size=4,
         )
         generated_tokens = out[0][input_tokens.input_ids.shape[1] :]
         reply_text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
@@ -1485,7 +1588,8 @@ def chat(req: ChatRequest):
 
     elapsed_sec = time.perf_counter() - start_time
     tokens_per_sec = round(num_tokens / max(0.001, elapsed_sec), 1)
-    reply_text = reply_text.replace("<|im_end|>", "").strip()
+    for stop_seq in ["<|im_end|>", "<|eot_id|>", "<|end_of_text|>"]:
+        reply_text = reply_text.replace(stop_seq, "").strip()
 
     # Sanitize any accidental CJK glyphs from Qwen multilingual backbone
     if re.search(r"[\u4e00-\u9fff]", reply_text):
@@ -1639,7 +1743,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/")
 @app.head("/")
 def serve_index():
-    return FileResponse("static/index.html")
+    response = FileResponse("static/index.html")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 if __name__ == "__main__":

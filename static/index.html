@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=2.5">
 </head>
 <body>
   <!-- App Container -->
@@ -35,8 +35,9 @@
           </label>
           <div class="custom-select-wrapper">
             <select id="model-select" class="model-dropdown">
-              <option value="tflite_350m" selected>⚡ medgemma_micro_cardio_350m.tflite (301.9 MB · M2 LiteRT)</option>
-              <option value="pytorch_edge">🧠 medgemma_micro_cardio_edge.safetensors (336.3 MB · PyTorch)</option>
+              <option value="pytorch_edge" selected>🧠 medgemma_micro_cardio_edge.safetensors (1,564 MB · Llama-3.2-1B Multimodal [v2.0 New])</option>
+              <option value="pytorch_qwen_05b">🔬 medgemma_micro_qwen_0.5b.safetensors (336 MB · Qwen2.5-0.5B Sub-512MB [v1.0 Legacy])</option>
+              <option value="tflite_350m">⚡ medgemma_micro_cardio_350m.tflite (301.9 MB · M2 LiteRT FlatBuffer)</option>
             </select>
           </div>
         </div>
@@ -51,21 +52,21 @@
       <div class="telemetry-hud">
         <div class="hud-pill" id="hud-accel-pill">
           <span class="hud-label">CHIP ACCEL</span>
-          <span class="hud-val text-cyan" id="hud-hardware">MacBook M2 · XNNPACK</span>
+          <span class="hud-val text-cyan" id="hud-hardware">Apple Silicon M2 (ARM64)</span>
         </div>
         <div class="hud-pill">
           <span class="hud-dot online"></span>
           <span class="hud-label">MODEL SIZE</span>
-          <span class="hud-val" id="hud-size">301.93 MB</span>
+          <span class="hud-val" id="hud-size">1564.38 MB</span>
         </div>
         <div class="hud-pill">
           <span class="hud-label">BUDGET</span>
-          <span class="hud-val highlight" id="hud-budget">&lt; 350 MB</span>
-          <span class="hud-sub" id="hud-headroom">(48.1 MB Headroom)</span>
+          <span class="hud-val highlight" id="hud-budget">&lt; 2048 MB</span>
+          <span class="hud-sub" id="hud-headroom">(483.62 MB Headroom)</span>
         </div>
         <div class="hud-pill">
           <span class="hud-label">SIGNATURE</span>
-          <span class="hud-val text-cyan" id="hud-sig">Dual-Signature</span>
+          <span class="hud-val text-cyan" id="hud-sig">1D-Conformer + Cross-Attention</span>
         </div>
       </div>
     </header>
@@ -221,7 +222,7 @@
           <div class="class-header">
             <div class="class-title-group">
               <h3 class="section-heading">Multi-Task Arrhythmia Classifier</h3>
-              <span class="section-sub" id="classifier-engine-sub">1D-Conformer Biosignal Encoder (medgemma_micro_cardio_350m.tflite)</span>
+              <span class="section-sub" id="classifier-engine-sub">1D-Conformer Biosignal Encoder (medgemma_micro_cardio_edge.safetensors · 1,564.38 MB)</span>
             </div>
             <button class="btn btn-primary btn-sm" id="btn-run-classifier">
               <span>⚡</span> Run Edge Classification
@@ -240,7 +241,7 @@
         <div class="chat-header">
           <div class="chat-title-group">
             <h2 class="panel-title">Cardiology Clinical Assistant</h2>
-            <span class="panel-caption" id="chat-engine-caption">medgemma_micro_cardio_350m.tflite (11-Layer Transformer · M2 LiteRT)</span>
+            <span class="panel-caption" id="chat-engine-caption">medgemma_micro_cardio_edge.safetensors (Llama-3.2-1B-Instruct · 1D-Conformer Multimodal)</span>
           </div>
 
           <!-- Multimodal Soft Prefix Switch & History Clear -->
@@ -410,6 +411,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=2.5"></script>
 </body>
 </html>

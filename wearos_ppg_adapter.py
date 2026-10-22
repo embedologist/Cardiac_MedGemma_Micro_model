@@ -539,6 +539,12 @@ class WearOSStreamBuffer:
 
         return conditioned, quality
 
+    def push_reading_consensus(self, calib_probs: np.ndarray) -> Tuple[int, np.ndarray]:
+        """Pushes calibrated probabilities to consensus filter and returns consensus prediction and averaged probabilities."""
+        pred_idx = int(np.argmax(calib_probs))
+        stable_idx, avg_probs, _ = self.consensus_filter.update(pred_idx, calib_probs)
+        return stable_idx, avg_probs
+
     def clear(self) -> None:
         """Clears all buffered points (resets the deque to empty)."""
         with self._lock:

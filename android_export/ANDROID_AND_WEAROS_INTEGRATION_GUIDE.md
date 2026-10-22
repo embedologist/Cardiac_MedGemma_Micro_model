@@ -515,7 +515,7 @@ class CardiologyChatActivity : AppCompatActivity() {
 
 ## Verification Summary
 
-The model and integration have been fully validated using [`test_unified_350m_model.py`](file:///Users/Riaan/Documents/MedGemma_Micro_model/test_unified_350m_model.py):
+The model and integration have been fully validated using [`test_unified_350m_model.py`](file:///Volumes/nvme/projects/MedGemma_Micro_model/test_unified_350m_model.py):
 - **Model Size**: 301.93 MB (Target: 300–350 MB)
 - **Arrhythmia Multi-Reading Stability**: 100.0% (50/50 tests passed, 0% flapping)
 - **Cardiology Clinical Q&A Accuracy**: 100.0% (25/25 diverse clinical scenarios verified)

@@ -9,8 +9,16 @@ Verifies:
   5. GET /api/presets provides curated clinical cases.
 """
 
+import os
+import sys
+
+# Auto-delegate to .venv/bin/python if running outside virtual environment
+venv_python = os.path.abspath(os.path.join(os.path.dirname(__file__), ".venv", "bin", "python"))
+if os.path.exists(venv_python) and os.path.realpath(sys.executable) != os.path.realpath(venv_python):
+    os.execv(venv_python, [venv_python] + sys.argv)
+
 from fastapi.testclient import TestClient
-from app import app, load_medgemma_micro_model
+from app import app, load_medgemma_micro_model, load_tflite_350m_model, state
 
 
 def test_api():
@@ -19,8 +27,10 @@ def test_api():
     print("=" * 60)
 
     # Initialize model
-    print("[1/5] Initializing model and TestClient...")
+    print("[1/5] Initializing models (TFLite 350M & PyTorch) and TestClient...")
+    load_tflite_350m_model()
     load_medgemma_micro_model()
+    state["active_engine"] = "tflite_350m"
     client = TestClient(app)
 
     # 1. Status Check
@@ -29,7 +39,7 @@ def test_api():
     assert res.status_code == 200, f"Status failed: {res.text}"
     data = res.json()
     assert data["status"] == "ready"
-    assert data["size_mb"] < 512.0, f"Size exceeds 512MB: {data['size_mb']} MB"
+    assert data["size_mb"] <= data["budget_limit_mb"], f"Size exceeds budget: {data['size_mb']} MB > {data['budget_limit_mb']} MB"
     assert "target_platforms" in data
     print(f"  -> Model Status: OK (Size: {data['size_mb']} MB, Headroom: {data['headroom_mb']} MB, Target: {data['target_platforms']})")
 
@@ -153,18 +163,24 @@ def test_api():
     models_data = res_models.json()
     model_ids = [m["id"] for m in models_data["models"]]
     assert "tflite_350m" in model_ids, "Unified 350M TFLite model must be present in registry"
-    assert "pytorch_edge" in model_ids, "PyTorch Edge model must be present in registry"
+    assert "pytorch_edge" in model_ids, "PyTorch Edge (Llama-3.2-1B) model must be present in registry"
+    assert "pytorch_qwen_05b" in model_ids, "PyTorch Qwen-0.5B model must be present in registry"
     print(f"  -> Verified Models: {model_ids}, Active: {models_data['active_engine']}")
 
-    # 11. Dynamic Model Switching
-    print("[12/13] Testing POST /api/models/switch (Dual Engine)...")
+    # 11. Dynamic Model Switching Across All Models
+    print("[12/13] Testing POST /api/models/switch (Triple Engine: Llama-1B, Qwen-0.5B, TFLite-350M)...")
     res_sw1 = client.post("/api/models/switch", json={"model_id": "pytorch_edge"})
     assert res_sw1.status_code == 200 and res_sw1.json()["active_engine"] == "pytorch_edge"
-    print(f"  -> Switched to PyTorch Engine: {res_sw1.json()['model_name']}")
+    print(f"  -> Switched to PyTorch Llama-1B Engine: {res_sw1.json()['model_name']} ({res_sw1.json()['size_mb']} MB)")
+
+    res_sw_qwen = client.post("/api/models/switch", json={"model_id": "pytorch_qwen_05b"})
+    assert res_sw_qwen.status_code == 200 and res_sw_qwen.json()["active_engine"] == "pytorch_qwen_05b"
+    assert res_sw_qwen.json()["budget_limit_mb"] == 512.0
+    print(f"  -> Switched to PyTorch Qwen-0.5B Engine: {res_sw_qwen.json()['model_name']} ({res_sw_qwen.json()['size_mb']} MB)")
 
     res_sw2 = client.post("/api/models/switch", json={"model_id": "tflite_350m"})
     assert res_sw2.status_code == 200 and res_sw2.json()["active_engine"] == "tflite_350m"
-    print(f"  -> Switched back to TFLite 350M: {res_sw2.json()['model_name']}")
+    print(f"  -> Switched back to TFLite 350M: {res_sw2.json()['model_name']} ({res_sw2.json()['size_mb']} MB)")
 
     # 12. Full M2 Benchmark Verification
     print("[13/13] Testing POST /api/tflite/benchmark (MacBook M2 Automated Suite)...")
