@@ -15,6 +15,8 @@ import time
 import json
 import logging
 import platform
+import threading
+import gc
 from typing import List, Optional, Dict, Any, Union
 
 import numpy as np
@@ -92,7 +94,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global model state
+# Global model state and concurrency synchronization lock
+state_lock = threading.Lock()
 state = {
     "active_engine": "pytorch_edge",  # "pytorch_edge" (Llama-1B v2.0), "pytorch_qwen_05b" (Qwen-0.5B v1.0), or "tflite_350m"
     "active_pytorch_engine": "pytorch_edge",
@@ -209,6 +212,13 @@ def load_medgemma_micro_model(target_engine: str = "pytorch_edge") -> bool:
     state["device"] = device
 
     norm_target = "pytorch_qwen_05b" if target_engine == "pytorch_qwen_05b" else "pytorch_edge"
+
+    # Evict inactive PyTorch models from RAM to respect mobile hardware limits (<2GB RAM)
+    for other_engine in list(state.get("loaded_pytorch_models", {}).keys()):
+        if other_engine != norm_target:
+            del state["loaded_pytorch_models"][other_engine]
+            gc.collect()
+            logger.info("Evicted inactive model '%s' from RAM cache.", other_engine)
 
     # Check cache first for instant switching
     if norm_target in state.get("loaded_pytorch_models", {}):
@@ -899,20 +909,25 @@ def generate_ppg(req: PPGGenerateRequest):
 @app.post("/api/ppg/classify")
 def classify_ppg(req: Optional[PPGClassifyRequest] = None):
     """Classifies cardiac rhythm via medgemma_micro_cardio_350m.tflite (or PyTorch)."""
-    sim = state["simulator"] or PPGSimulator(sampling_rate=25, duration_sec=90)
+    with state_lock:
+        sim = state["simulator"] or PPGSimulator(sampling_rate=25, duration_sec=90)
 
-    if req and req.condition is not None:
-        signal, cond = sim.generate_window(req.condition)
-        state["current_ppg"] = signal
-        state["current_condition"] = req.condition
-    else:
-        signal = state["current_ppg"]
-        cond = state["current_condition"]
+        if req and req.condition is not None:
+            if state["current_ppg"] is None or state["current_condition"] != req.condition:
+                signal, cond = sim.generate_window(req.condition)
+                state["current_ppg"] = signal
+                state["current_condition"] = req.condition
+            else:
+                signal = state["current_ppg"]
+                cond = state["current_condition"]
+        else:
+            signal = state["current_ppg"]
+            cond = state["current_condition"]
 
-    if signal is None:
-        signal, cond = sim.generate_window(0)
-        state["current_ppg"] = signal
-        state["current_condition"] = 0
+        if signal is None:
+            signal, cond = sim.generate_window(0)
+            state["current_ppg"] = signal
+            state["current_condition"] = 0
 
     # 1. Execute TFLite 350M if active or available
     if state["active_engine"] == "tflite_350m" and state["tflite_loaded"]:
@@ -1208,14 +1223,15 @@ def chat(req: ChatRequest):
         "hello there", "good day", "morning", "evening"
     }
 
+    # Only treat as a greeting if the user message is primarily a short greeting (<= 4 words)
     is_greeting = (
         clean_alphanumeric in greeting_phrases
-        or any(clean_alphanumeric.startswith(g + " ") for g in ["hi", "hello", "hey", "good morning", "good evening"])
+        or (len(clean_msg.split()) <= 4 and any(clean_alphanumeric.startswith(g + " ") for g in ["hi", "hello", "hey", "good morning", "good evening"]))
     )
     # Ensure it's not a medical query that just started with a greeting
     has_medical_terms = any(
         kw in clean_msg
-        for kw in ["pain", "heart", "ecg", "ppg", "statin", "rate", "mg", "doctor", "blood", "bp", "diet", "sleep", "attack", "arrhythmia"]
+        for kw in ["pain", "heart", "ecg", "ppg", "statin", "rate", "mg", "doctor", "blood", "bp", "diet", "sleep", "attack", "arrhythmia", "pill", "medication", "drug", "dose"]
     )
 
     if is_greeting and not has_medical_terms:
@@ -1306,14 +1322,30 @@ def chat(req: ChatRequest):
     # Detect life-threatening emergency triage red flags
     clean_inquiry = req.message.lower()
     is_emergency_chest_pain = (
-        any(w in clean_inquiry for w in ["chest pressure", "chest pain", "crushing", "squeezing"])
-        and any(w in clean_inquiry for w in ["arm", "radiat", "sweat", "breath", "jaw", "neck"])
+        any(w in clean_inquiry for w in ["crushing chest", "crushing pressure", "crushing pain", "squeezing chest", "heart attack"])
+        or (
+            any(w in clean_inquiry for w in ["chest pressure", "chest pain", "tightness in chest"])
+            and any(w in clean_inquiry for w in ["arm", "radiat", "sweat", "breath", "jaw", "neck", "severe", "crushing"])
+        )
     )
+    hr_high_match = re.search(r"\b(1[3-9]\d|2\d\d)\b", clean_inquiry)
     is_emergency_syncope_tachy = (
         any(w in clean_inquiry for w in ["faint", "syncope", "dizzy", "lightheaded", "black out", "pass out"])
-        and any(w in clean_inquiry for w in ["160", "150", "racing", "uncontrollably", "tachycardia", "pounding"])
+        and (hr_high_match is not None or any(w in clean_inquiry for w in ["160", "150", "racing", "uncontrollably", "tachycardia", "pounding", "rapid"]))
     )
-    is_emergency_red_flag = is_emergency_chest_pain or is_emergency_syncope_tachy
+    # Distinguish active patient emergencies from academic/exam knowledge queries
+    is_first_person_emergency = (
+        any(w in clean_inquiry for w in ["i am experiencing", "i feel", "started 20 minutes", "what should i do right now", "is this an emergency", "i nearly passed out", "my smartwatch shows"])
+        or ("right now" in clean_inquiry)
+    )
+    is_academic_exam_query = (
+        any(w in clean_inquiry for w in [
+            "usmle", "board exam", "clinical vignette", "reperfusion strategy",
+            "target timeline", "according to", "guidelines", "landmark", "trial",
+            "what is the definitive diagnosis", "what additional", "what is the most appropriate"
+        ])
+    )
+    is_emergency_red_flag = (is_emergency_chest_pain or is_emergency_syncope_tachy) and (is_first_person_emergency or not is_academic_exam_query)
 
     # Detect if inquiry is specifically asking to interpret sensor readings / waveforms
     is_telemetry_query = any(
@@ -1423,8 +1455,9 @@ def chat(req: ChatRequest):
     device = state["device"]
 
     # Query on-device Clinical RAG engine
-    rag_docs = clinical_rag_engine.retrieve(req.message, condition=cond_name, top_k=1)
-    rag_context = clinical_rag_engine.get_formatted_context(req.message, condition=cond_name)
+    rag_condition = cond_name if req.use_ppg_context else None
+    rag_docs = clinical_rag_engine.retrieve(req.message, condition=rag_condition, top_k=1)
+    rag_context = clinical_rag_engine.get_formatted_context(req.message, condition=rag_condition)
     rag_title = rag_docs[0]["title"] if (rag_docs and rag_docs[0].get("retrieval_score", 0) > 2.0) else None
 
     # Run 1D-Conformer sensor classification if PPG context is requested
@@ -1452,14 +1485,30 @@ def chat(req: ChatRequest):
     # Detect life-threatening emergency triage red flags
     clean_inquiry = req.message.lower()
     is_emergency_chest_pain = (
-        any(w in clean_inquiry for w in ["chest pressure", "chest pain", "crushing", "squeezing"])
-        and any(w in clean_inquiry for w in ["arm", "radiat", "sweat", "breath", "jaw", "neck"])
+        any(w in clean_inquiry for w in ["crushing chest", "crushing pressure", "crushing pain", "squeezing chest", "heart attack"])
+        or (
+            any(w in clean_inquiry for w in ["chest pressure", "chest pain", "tightness in chest"])
+            and any(w in clean_inquiry for w in ["arm", "radiat", "sweat", "breath", "jaw", "neck", "severe", "crushing"])
+        )
     )
+    hr_high_match = re.search(r"\b(1[3-9]\d|2\d\d)\b", clean_inquiry)
     is_emergency_syncope_tachy = (
         any(w in clean_inquiry for w in ["faint", "syncope", "dizzy", "lightheaded", "black out", "pass out"])
-        and any(w in clean_inquiry for w in ["160", "150", "racing", "uncontrollably", "tachycardia", "pounding"])
+        and (hr_high_match is not None or any(w in clean_inquiry for w in ["160", "150", "racing", "uncontrollably", "tachycardia", "pounding", "rapid"]))
     )
-    is_emergency_red_flag = is_emergency_chest_pain or is_emergency_syncope_tachy
+    # Distinguish active patient emergencies from academic/exam knowledge queries
+    is_first_person_emergency = (
+        any(w in clean_inquiry for w in ["i am experiencing", "i feel", "started 20 minutes", "what should i do right now", "is this an emergency", "i nearly passed out", "my smartwatch shows"])
+        or ("right now" in clean_inquiry)
+    )
+    is_academic_exam_query = (
+        any(w in clean_inquiry for w in [
+            "usmle", "board exam", "clinical vignette", "reperfusion strategy",
+            "target timeline", "according to", "guidelines", "landmark", "trial",
+            "what is the definitive diagnosis", "what additional", "what is the most appropriate"
+        ])
+    )
+    is_emergency_red_flag = (is_emergency_chest_pain or is_emergency_syncope_tachy) and (is_first_person_emergency or not is_academic_exam_query)
 
     # Detect if inquiry is specifically asking to interpret sensor readings / waveforms
     is_telemetry_query = any(
@@ -1528,7 +1577,8 @@ def chat(req: ChatRequest):
         ambient_ctx = f"[Patient Context: Resting HR {bpm} BPM, Monitored Rhythm: {cond_name}]\n" if req.use_ppg_context else ""
         user_query = (
             f"{ambient_ctx}{rag_context}\n"
-            f"Based on the verified clinical evidence above, provide a thorough, clear, and direct answer in English to the inquiry:\n"
+            f"Based on the verified clinical evidence above, provide a thorough, clear, and direct clinical answer in English to the inquiry. "
+            f"Explicitly name the specific medications, clinical classes, and guideline targets:\n"
             f"{req.message}"
         )
     else:
@@ -1567,22 +1617,39 @@ def chat(req: ChatRequest):
     input_tokens = tokenizer(formatted_input, return_tensors="pt").to(device)
 
     # Dynamic minimum token bound
-    min_tokens = min(20, max(10, req.max_tokens - 40)) if req.max_tokens >= 80 else 10
+    min_tokens = min(40, max(15, req.max_tokens - 40)) if req.max_tokens >= 80 else 10
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
 
     start_time = time.perf_counter()
     with torch.no_grad():
-        out = model.student_lm.generate(
-            **input_tokens,
-            max_new_tokens=req.max_tokens,
-            min_new_tokens=min_tokens,
-            do_sample=True,
-            temperature=min(0.65, max(0.25, req.temperature)),
-            top_p=0.9,
-            pad_token_id=pad_id,
-            repetition_penalty=1.12,
-        )
-        generated_tokens = out[0][input_tokens.input_ids.shape[1] :]
+        if req.use_ppg_context and curr_ppg is not None and hasattr(model, "generate"):
+            signal_tensor = torch.tensor(curr_ppg, dtype=torch.float32).unsqueeze(0).to(device)
+            out = model.generate(
+                input_ids=input_tokens["input_ids"],
+                ppg_waveforms=signal_tensor,
+                attention_mask=input_tokens["attention_mask"],
+                max_new_tokens=req.max_tokens,
+                min_new_tokens=min_tokens,
+                do_sample=True,
+                temperature=min(0.65, max(0.25, req.temperature)),
+                top_p=0.9,
+                pad_token_id=pad_id,
+                repetition_penalty=1.12,
+            )
+            # When generate() runs with inputs_embeds, out contains only the newly generated tokens
+            generated_tokens = out[0]
+        else:
+            out = model.student_lm.generate(
+                **input_tokens,
+                max_new_tokens=req.max_tokens,
+                min_new_tokens=min_tokens,
+                do_sample=True,
+                temperature=min(0.65, max(0.25, req.temperature)),
+                top_p=0.9,
+                pad_token_id=pad_id,
+                repetition_penalty=1.12,
+            )
+            generated_tokens = out[0][input_tokens.input_ids.shape[1] :]
         reply_text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
         num_tokens = len(generated_tokens)
 

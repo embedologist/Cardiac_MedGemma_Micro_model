@@ -191,13 +191,14 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
         "title": "AHA/ACC Heart Failure Guideline-Directed Medical Therapy (GDMT)",
         "category": "Medications",
         "condition_tag": "General Cardiology",
-        "keywords": ["heart failure", "hfref", "gdmt", "entresto", "sglt2i", "spironolactone", "ejection fraction"],
+        "keywords": ["heart failure", "hfref", "gdmt", "entresto", "sglt2i", "spironolactone", "eplerenone", "mra", "mineralocorticoid", "aldosterone", "ejection fraction"],
         "content": (
             "Guideline-Directed Medical Therapy for HFrEF (LVEF <= 40%) consists of 4 foundational pharmacological pillars: "
             "1) ARNI (Sacubitril/Valsartan) preferred over ACEi/ARB to reduce mortality; 2) Evidence-based Beta-blocker "
-            "(Carvedilol, Metoprolol succinate, or Bisoprolol); 3) Mineralocorticoid Receptor Antagonist (Spironolactone or Eplerenone); "
-            "4) SGLT2 Inhibitor (Empagliflozin or Dapagliflozin). Titrate doses to target guideline levels as tolerated while "
-            "monitoring renal function and serum potassium."
+            "(Carvedilol, Metoprolol succinate, or Bisoprolol); 3) Mineralocorticoid Receptor Antagonist (MRA: Spironolactone or Eplerenone); "
+            "4) SGLT2 Inhibitor (Empagliflozin or Dapagliflozin). In patients with symptomatic HFrEF (NYHA Class II-IV) despite Beta-blocker "
+            "and ACEi/ARB/ARNI, adding a Mineralocorticoid Receptor Antagonist (MRA, eplerenone or spironolactone) reduces all-cause mortality "
+            "and hospitalizations. Titrate doses to target guideline levels as tolerated while monitoring renal function and serum potassium."
         ),
         "safety_warning": "Monitor serum potassium and creatinine within 1-2 weeks of initiating or up-titrating ARNI or MRA."
     },
@@ -283,6 +284,80 @@ CARDIOLOGY_GUIDELINES: List[Dict[str, Any]] = [
             "adherence to Mediterranean or DASH dietary patterns, maintaining blood pressure < 120/80 mmHg, and 7-9 hours of restorative sleep."
         ),
         "safety_warning": "Routine resting rates persistently > 100 bpm or < 50 bpm outside of trained athletes should be clinically evaluated."
+    },
+    # -------------------------------------------------------------------------
+    # 11. ACUTE CORONARY SYNDROMES & STEMI REPERFUSION (ACC/AHA)
+    # -------------------------------------------------------------------------
+    {
+        "id": "stemi_reperfusion_guidelines",
+        "title": "ACC/AHA STEMI Guidelines: Immediate Reperfusion & PCI Timelines",
+        "category": "Emergency",
+        "condition_tag": "General Cardiology",
+        "keywords": ["stemi", "reperfusion", "pci", "percutaneous coronary", "door-to-balloon", "90 minutes", "chest pain", "st elevation", "infarction", "inferior"],
+        "content": (
+            "ACC/AHA STEMI Reperfusion Guidelines: For acute ST-segment elevation myocardial infarction (STEMI, "
+            "e.g., ST elevation in leads II, III, aVF indicating acute inferior STEMI), primary Percutaneous Coronary "
+            "Intervention (PCI) is the definitive first-line reperfusion strategy. The guideline door-to-balloon target "
+            "timeline is strictly <= 90 minutes for PCI-capable hospitals (or <= 120 minutes if emergency inter-hospital "
+            "transfer is required). If transfer for primary PCI cannot be accomplished within 120 minutes, intravenous "
+            "fibrinolytic therapy (e.g., tenecteplase, alteplase) should be administered within 30 minutes of presentation."
+        ),
+        "safety_warning": "Immediate primary PCI within 90 minutes door-to-balloon is the preferred guideline reperfusion strategy."
+    },
+    # -------------------------------------------------------------------------
+    # 12. SGLT2 INHIBITORS IN HEART FAILURE (DAPA-HF, EMPEROR, DELIVER)
+    # -------------------------------------------------------------------------
+    {
+        "id": "sglt2_heart_failure_evidence",
+        "title": "SGLT2 Inhibitors in Heart Failure: DAPA-HF, EMPEROR-Reduced, and DELIVER Trials",
+        "category": "Medications",
+        "condition_tag": "General Cardiology",
+        "keywords": ["sglt2", "dapagliflozin", "empagliflozin", "heart failure", "dapa-hf", "emperor-reduced", "deliver", "ejection fraction", "hospitalization", "mortality"],
+        "content": (
+            "Evidence from landmark clinical trials (DAPA-HF, EMPEROR-Reduced, DELIVER, EMPEROR-Preserved): "
+            "Sodium-glucose cotransporter 2 (SGLT2) inhibitors, specifically Dapagliflozin (10 mg daily) and Empagliflozin (10 mg daily), "
+            "significantly reduce cardiovascular mortality and heart failure hospitalizations across the entire spectrum of heart failure, "
+            "regardless of baseline left ventricular ejection fraction (reduced, mildly reduced, or preserved) and regardless of diabetes status. "
+            "SGLT2 inhibitors constitute one of the four mandatory foundational pillars of Guideline-Directed Medical Therapy (GDMT)."
+        ),
+        "safety_warning": "Monitor for euglycemic ketoacidosis and volume depletion upon initiating SGLT2 inhibitors."
+    },
+    # -------------------------------------------------------------------------
+    # 13. SPRINT TRIAL & INTENSIVE BLOOD PRESSURE TARGETS
+    # -------------------------------------------------------------------------
+    {
+        "id": "sprint_trial_hypertension",
+        "title": "SPRINT Trial: Intensive Systolic Blood Pressure Targets (< 120 mmHg)",
+        "category": "Guidelines",
+        "condition_tag": "General Cardiology",
+        "keywords": ["sprint", "sprint trial", "systolic", "blood pressure", "120", "hypertension", "mortality", "cardiovascular", "intensive"],
+        "content": (
+            "Landmark SPRINT Trial Evidence: The landmark Systolic Blood Pressure Intervention Trial (SPRINT) demonstrated "
+            "that intensive blood pressure lowering targeting a systolic blood pressure below 120 mmHg in high-risk non-diabetic adults "
+            "resulted in a statistically significant 25% relative risk reduction in major cardiovascular events (myocardial infarction, "
+            "acute coronary syndrome, stroke, heart failure, and cardiovascular death) and a 27% reduction in all-cause mortality "
+            "compared to standard blood pressure targets (systolic blood pressure below 140 mmHg)."
+        ),
+        "safety_warning": "Intensive blood pressure lowering requires close monitoring for hypotension, syncope, and acute kidney injury."
+    },
+    # -------------------------------------------------------------------------
+    # 14. VALVULAR HEART DISEASE: SEVERE AORTIC STENOSIS (ACC/AHA)
+    # -------------------------------------------------------------------------
+    {
+        "id": "aortic_stenosis_guidelines",
+        "title": "ACC/AHA Guidelines for Severe Aortic Stenosis: Diagnosis and Intervention",
+        "category": "Valvular Disease",
+        "condition_tag": "General Cardiology",
+        "keywords": ["aortic stenosis", "severe aortic", "murmur", "pulsus parvus", "tavr", "savr", "valve replacement", "syncope", "dyspnea", "angina"],
+        "content": (
+            "ACC/AHA Valvular Heart Disease Guidelines for Severe Aortic Stenosis: The classic clinical presentation includes "
+            "the symptom triad of exertional dyspnea, angina, and syncope. Physical examination characteristically reveals a late-peaking "
+            "harsh systolic crescendo-decrescendo ejection murmur at the right upper sternal border radiating to both carotids, single or paradoxical "
+            "splitting of S2, and a diminished, delayed carotid arterial pulse (pulsus parvus et tardus). The definitive diagnosis is severe "
+            "aortic stenosis, and the primary curative intervention is Aortic Valve Replacement (AVR), via Transcatheter Aortic Valve "
+            "Replacement (TAVR) or Surgical Aortic Valve Replacement (SAVR). Medical therapy is palliative; valve replacement is curative."
+        ),
+        "safety_warning": "Symptomatic severe aortic stenosis carries high mortality without prompt aortic valve replacement (TAVR/SAVR)."
     },
 ]
 

@@ -1,0 +1,242 @@
+{
+  "benchmark_timestamp": "2026-11-14 10:46:01 UTC",
+  "hardware_telemetry": {
+    "system": "Darwin",
+    "release": "27.0.0",
+    "machine": "arm64",
+    "processor": "arm",
+    "physical_cores": 8,
+    "logical_cores": 8,
+    "total_ram_gb": 16.0,
+    "python_version": "3.13.14",
+    "accelerator_delegate": "XNNPACK CPU Delegate (ARM64 Neon SIMD)"
+  },
+  "suites": {
+    "suite_1_wearable_classifier_litert": {
+      "runs": 500,
+      "warmup_runs": 100,
+      "mean_ms": 1.158,
+      "median_ms": 1.146,
+      "p90_ms": 1.194,
+      "p95_ms": 1.238,
+      "p99_ms": 1.297,
+      "min_ms": 1.109,
+      "max_ms": 1.345,
+      "std_ms": 0.036,
+      "throughput_inf_per_sec": 863.3,
+      "real_time_factor": 1.29e-05,
+      "real_time_multiplier": 77720.2,
+      "file_size_kb": 203.91
+    },
+    "suite_2_smartwatch_unified_350m": {
+      "runs": 100,
+      "warmup_runs": 20,
+      "mean_ms": 141.457,
+      "median_ms": 140.937,
+      "p90_ms": 141.539,
+      "p95_ms": 142.584,
+      "p99_ms": 168.342,
+      "min_ms": 139.152,
+      "max_ms": 170.24,
+      "std_ms": 4.14,
+      "throughput_inf_per_sec": 7.1,
+      "file_size_mb": 301.93
+    },
+    "suite_3_pytorch_conformer_vs_litert": {
+      "runs": 50,
+      "roundtrip_mean_ms": 11.12,
+      "roundtrip_median_ms": 10.411,
+      "roundtrip_p95_ms": 11.293,
+      "internal_inference_mean_ms": 9.209,
+      "internal_inference_median_ms": 9.045,
+      "internal_inference_p95_ms": 9.678,
+      "throughput_inf_per_sec": 108.6,
+      "litert_speedup_factor": 7.95,
+      "litert_memory_saving_ratio": "99.87% reduction (1.56GB -> 204KB)"
+    },
+    "suite_4_edge_llm_generation": [
+      {
+        "tier": "Tier 1: Brief Advisory / Triage",
+        "target_tokens": 40,
+        "mean_tokens_generated": 40,
+        "mean_elapsed_sec": 5.76,
+        "mean_tokens_per_sec": 7.0,
+        "mean_inter_token_latency_ms": 143.9,
+        "ttft_est_sec": 0.004,
+        "runs": [
+          {
+            "run": 1,
+            "elapsed_sec": 5.7,
+            "tokens_generated": 40,
+            "tokens_per_sec": 7.0,
+            "inter_token_latency_ms": 142.86,
+            "rag_grounded": true
+          },
+          {
+            "run": 2,
+            "elapsed_sec": 5.82,
+            "tokens_generated": 40,
+            "tokens_per_sec": 6.9,
+            "inter_token_latency_ms": 144.93,
+            "rag_grounded": true
+          }
+        ]
+      },
+      {
+        "tier": "Tier 2: Guideline Q&A with RAG",
+        "target_tokens": 80,
+        "mean_tokens_generated": 80,
+        "mean_elapsed_sec": 10.88,
+        "mean_tokens_per_sec": 7.3,
+        "mean_inter_token_latency_ms": 136.1,
+        "ttft_est_sec": -0.008,
+        "runs": [
+          {
+            "run": 1,
+            "elapsed_sec": 10.9,
+            "tokens_generated": 80,
+            "tokens_per_sec": 7.3,
+            "inter_token_latency_ms": 136.99,
+            "rag_grounded": true
+          },
+          {
+            "run": 2,
+            "elapsed_sec": 10.86,
+            "tokens_generated": 80,
+            "tokens_per_sec": 7.4,
+            "inter_token_latency_ms": 135.14,
+            "rag_grounded": true
+          }
+        ]
+      },
+      {
+        "tier": "Tier 3: In-Depth Multimodal Clinical Consultation",
+        "target_tokens": 160,
+        "mean_tokens_generated": 160,
+        "mean_elapsed_sec": 21.7,
+        "mean_tokens_per_sec": 7.4,
+        "mean_inter_token_latency_ms": 135.1,
+        "ttft_est_sec": 0.084,
+        "runs": [
+          {
+            "run": 1,
+            "elapsed_sec": 21.7,
+            "tokens_generated": 160,
+            "tokens_per_sec": 7.4,
+            "inter_token_latency_ms": 135.14,
+            "rag_grounded": true
+          }
+        ]
+      }
+    ],
+    "suite_5_power_and_battery_modeling": {
+      "hardware_profiles": {
+        "samsung_galaxy_watch_6": {
+          "battery_capacity_mah": 425,
+          "nominal_voltage_v": 3.85,
+          "energy_capacity_joules": 5890.5,
+          "active_npu_power_watts": 1.1
+        },
+        "apple_watch_series_9": {
+          "battery_capacity_mah": 308,
+          "nominal_voltage_v": 3.85,
+          "energy_capacity_joules": 4268.9,
+          "active_npu_power_watts": 1.1
+        },
+        "companion_smartphone": {
+          "battery_capacity_mah": 4575,
+          "nominal_voltage_v": 3.85,
+          "energy_capacity_joules": 63409.5,
+          "active_cpu_power_watts": 4.2
+        }
+      },
+      "energy_per_inference": {
+        "wearable_ppg_classifier_mj": 1.2738,
+        "wearable_ppg_classifier_joules": 0.001274,
+        "smartwatch_350m_multimodal_mj": 155.6,
+        "smartwatch_350m_multimodal_joules": 0.1556,
+        "phone_llm_80tok_turn_joules": 45.7,
+        "phone_llm_energy_per_token_mj": 571.2
+      },
+      "daily_wearable_monitoring_drain_24h": {
+        "routine_15min_interval": {
+          "inferences_per_day": 96,
+          "total_energy_consumed_joules": 0.1223,
+          "galaxy_watch_battery_drain_pct": 0.0021,
+          "apple_watch_battery_drain_pct": 0.0029,
+          "rating": "Virtually Negligible (<0.01% battery/day)"
+        },
+        "intensive_5min_interval": {
+          "inferences_per_day": 288,
+          "total_energy_consumed_joules": 0.3669,
+          "galaxy_watch_battery_drain_pct": 0.0062,
+          "apple_watch_battery_drain_pct": 0.0086,
+          "rating": "Negligible (<0.03% battery/day)"
+        },
+        "continuous_realtime_stream_90s": {
+          "inferences_per_day": 960,
+          "total_energy_consumed_joules": 1.2228,
+          "galaxy_watch_battery_drain_pct": 0.021,
+          "apple_watch_battery_drain_pct": 0.029,
+          "rating": "Extreme Efficiency (<0.10% battery/day)"
+        }
+      },
+      "battery_autonomy": {
+        "max_sensor_inferences_galaxy_watch": 4624352,
+        "max_sensor_inferences_apple_watch": 3351295,
+        "max_350m_queries_galaxy_watch": 37856,
+        "max_llm_consultations_phone": 1387
+      }
+    }
+  },
+  "compliance_scorecard": {
+    "all_standards_passed": true,
+    "total_checks": 6,
+    "passed_checks": 6,
+    "compliance_rate_pct": 100.0,
+    "checks": [
+      {
+        "standard": "MLPerf Tiny / Mobile Latency Target",
+        "requirement": "Wearable sensor classification latency < 50.0 ms",
+        "measured": "1.158 ms",
+        "passed": true,
+        "margin": "43.2x faster than requirement"
+      },
+      {
+        "standard": "Wear OS Background Power Impact Budget",
+        "requirement": "24h background periodic monitoring battery consumption < 1.00%",
+        "measured": "0.0021% per 24h",
+        "passed": true,
+        "margin": "99.8% headroom below energy ceiling"
+      },
+      {
+        "standard": "Standalone Smartwatch Memory Budget",
+        "requirement": "Smartwatch deployment disk footprint <= 350.0 MB",
+        "measured": "301.93 MB",
+        "passed": true,
+        "margin": "48.1 MB headroom"
+      },
+      {
+        "standard": "Wearable Real-Time Processing Factor",
+        "requirement": "Real-time processing factor RTF <= 0.05 (20x faster than real-time)",
+        "measured": "0.000013 (77720.2x)",
+        "passed": true,
+        "margin": "Over 75,000x faster than live signal generation"
+      },
+      {
+        "standard": "Interactive UI Responsiveness Budget",
+        "requirement": "Standalone multimodal query latency < 300.0 ms",
+        "measured": "141.457 ms",
+        "passed": true,
+        "margin": "158.5 ms headroom"
+      },
+      {
+        "standard": "Companion Phone Edge LLM Throughput",
+        "requirement": "Interactive reading speed >= 5.0 tokens/second on mobile CPU",
+        "measured": "7.3 tokens/sec",
+        "passed": true,
+        "margin": "+2.3 tok/s above threshold"
+      }
+    ]
+  }
+}

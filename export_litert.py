@@ -14,6 +14,7 @@ Target Devices:
 import os
 import sys
 import argparse
+from typing import Optional
 import torch
 from pipeline import PPGConformerEncoder, PPGCrossAttentionProjector
 
@@ -74,27 +75,38 @@ def export_conformer_to_onnx(output_dir: str = "litert_export", latent_dim: int 
         print("  -> To generate ONNX/LiteRT: pip install onnx onnxscript")
 
 
-def export_projector_to_onnx(output_dir: str = "litert_export", sensor_dim: int = 256, llm_dim: int = 896):
+def export_projector_to_onnx(output_dir: str = "litert_export", sensor_dim: int = 256, llm_dim: Optional[int] = None):
     """
     Exports the Temporal Cross-Attention Projector to ONNX format.
+    Automatically detects llm_dim from checkpoint metadata/tensors (e.g. 2048 for Llama, 896 for Qwen).
     """
     os.makedirs(output_dir, exist_ok=True)
-    projector = PPGCrossAttentionProjector(sensor_dim=sensor_dim, llm_dim=llm_dim, num_prefix_tokens=4)
     checkpoint_path = "medgemma_micro_cardio_edge.safetensors"
+    proj_sd = {}
     if os.path.exists(checkpoint_path):
         try:
             import safetensors.torch
             with safetensors.safe_open(checkpoint_path, framework="pt") as f:
+                if llm_dim is None and "ppg_projector.queries" in f.keys():
+                    llm_dim = int(f.get_tensor("ppg_projector.queries").shape[-1])
                 proj_sd = {
                     k.replace("ppg_projector.", ""): f.get_tensor(k).to(torch.float32)
                     for k in f.keys()
                     if k.startswith("ppg_projector.")
                 }
-            if proj_sd:
-                projector.load_state_dict(proj_sd, strict=False)
-                print(f"  -> Loaded {len(proj_sd)} trained projector weights from '{checkpoint_path}'")
         except Exception as e:
-            print(f"  -> Note: using default weights ({e})")
+            print(f"  -> Note: could not inspect checkpoint ({e})")
+
+    if llm_dim is None:
+        llm_dim = 896
+
+    projector = PPGCrossAttentionProjector(sensor_dim=sensor_dim, llm_dim=llm_dim, num_prefix_tokens=4)
+    if proj_sd:
+        try:
+            projector.load_state_dict(proj_sd, strict=True)
+            print(f"  -> Successfully loaded {len(proj_sd)} trained projector weights (llm_dim={llm_dim}) from '{checkpoint_path}'")
+        except Exception as e:
+            print(f"  -> Warning: could not load exact state dict ({e}), using default weights.")
     projector.eval()
 
     example_input = torch.randn(1, sensor_dim)
@@ -144,7 +156,7 @@ Android LiteRT & TFLite Direct Deployment:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export MedGemma-Micro to Android LiteRT / TFLite")
     parser.add_argument("--output_dir", type=str, default="litert_export")
-    parser.add_argument("--tflite", action="store_true", default=True, help="Export native .tflite models for Android S24 Ultra")
+    parser.add_argument("--tflite", action=argparse.BooleanOptionalAction, default=False, help="Export native .tflite models for Android S24 Ultra")
     args = parser.parse_args()
 
     if args.tflite:

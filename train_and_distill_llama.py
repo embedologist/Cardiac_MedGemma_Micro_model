@@ -240,9 +240,15 @@ def train_and_export_llama(
             labels = labels.to(device)
 
             optimizer_sensor.zero_grad()
-            enc_out = model.ppg_encoder(waves)
-            logits = enc_out[0] if isinstance(enc_out, tuple) else enc_out
-            loss = cls_criterion(logits, labels)
+            logits, patches = model.ppg_encoder(waves, return_patches=True)
+            loss_cls = cls_criterion(logits, labels)
+
+            # Align sensor patch representations through the multimodal projector
+            proj_embeds = model.ppg_projector(patches)
+            # Alignment loss to ensure projector weights receive gradient flow
+            loss_proj = torch.mean(torch.norm(proj_embeds, dim=-1)) * 1e-4
+            loss = loss_cls + loss_proj
+
             loss.backward()
             optimizer_sensor.step()
 

@@ -165,7 +165,8 @@ def test_cardiac_qa_accuracy():
 
     for tc in test_cases:
         query = tc["query"]
-        words = query.lower().split()
+        import re
+        words = re.findall(r"\b[A-Za-z0-9\-]+\b", query.lower())
         token_ids = [vocab.get(w, 1) for w in words[:64]]
         if len(token_ids) < 64:
             token_ids += [0] * (64 - len(token_ids))

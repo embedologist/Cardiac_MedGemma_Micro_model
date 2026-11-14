@@ -1,0 +1,159 @@
+{
+  "timestamp": "2026-11-14 16:06:31",
+  "hardware": "Apple Silicon M2 (ARM64)",
+  "physionet_cinc_arrhythmia_benchmark": {
+    "overall_accuracy_pct": 95.0,
+    "macro_sensitivity_pct": 95.0,
+    "macro_specificity_pct": 98.75,
+    "macro_f1_score": 0.9488,
+    "tier_accuracies": {
+      "Tier 1: Clinical Clean Baseline": 98.0,
+      "Tier 2: Mild Tremor & Ambient Noise": 96.0,
+      "Tier 3: Exercise Movement Cadence": 92.0,
+      "Tier 4: Dynamic Respiratory Drift (0.2Hz)": 94.0
+    },
+    "per_class_metrics": {
+      "Normal Sinus Rhythm": {
+        "TP": 32,
+        "FP": 0,
+        "FN": 8,
+        "TN": 160,
+        "Sensitivity_pct": 80.0,
+        "Specificity_pct": 100.0,
+        "PPV_pct": 100.0,
+        "F1_score": 0.8889
+      },
+      "Atrial Fibrillation (AFib)": {
+        "TP": 40,
+        "FP": 5,
+        "FN": 0,
+        "TN": 155,
+        "Sensitivity_pct": 100.0,
+        "Specificity_pct": 96.88,
+        "PPV_pct": 88.89,
+        "F1_score": 0.9412
+      },
+      "Bradycardia": {
+        "TP": 40,
+        "FP": 3,
+        "FN": 0,
+        "TN": 157,
+        "Sensitivity_pct": 100.0,
+        "Specificity_pct": 98.12,
+        "PPV_pct": 93.02,
+        "F1_score": 0.9639
+      },
+      "Tachycardia": {
+        "TP": 40,
+        "FP": 0,
+        "FN": 0,
+        "TN": 160,
+        "Sensitivity_pct": 100.0,
+        "Specificity_pct": 100.0,
+        "PPV_pct": 100.0,
+        "F1_score": 1.0
+      },
+      "Premature Ventricular Contractions (PVC)": {
+        "TP": 38,
+        "FP": 2,
+        "FN": 2,
+        "TN": 158,
+        "Sensitivity_pct": 95.0,
+        "Specificity_pct": 98.75,
+        "PPV_pct": 95.0,
+        "F1_score": 0.95
+      }
+    },
+    "confusion_matrix": [
+      [
+        32,
+        3,
+        3,
+        0,
+        2
+      ],
+      [
+        0,
+        40,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        40,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        40,
+        0
+      ],
+      [
+        0,
+        2,
+        0,
+        0,
+        38
+      ]
+    ],
+    "total_waveforms_tested": 200,
+    "mean_inference_latency_ms": 15.93
+  },
+  "ieee_1708_hemodynamic_benchmark": {
+    "heart_rate_mae_bpm": 2.496,
+    "heart_rate_rmse_bpm": 5.262,
+    "pearson_correlation_r": 0.9948,
+    "bland_altman_bias_bpm": 2.376,
+    "bland_altman_loa_upper": 11.578,
+    "bland_altman_loa_lower": -6.826,
+    "ieee_1708_compliant": true,
+    "total_evaluations": 50
+  },
+  "wearos_smartwatch_telemetry_benchmark": {
+    "all_tests_passed": true,
+    "test_breakdown": {
+      "dc_baseline_removal": {
+        "raw_dc_baseline_counts": 722947,
+        "conditioned_mean": 0.0,
+        "conditioned_std": 1.0,
+        "passed": true
+      },
+      "anti_aliased_decimation": {
+        "input_samples_100hz": 9000,
+        "output_samples_25hz": 2250,
+        "passed": true
+      },
+      "ble_jitter_resilience": {
+        "packets_dropped_pct": 5.0,
+        "clock_jitter_ms": 25.0,
+        "grid_uniformity_restored": true,
+        "passed": true
+      },
+      "lead_off_rejection": {
+        "is_usable": false,
+        "quality_flag": "DETACHED_OR_LOOSE",
+        "passed": true
+      }
+    }
+  },
+  "edge_runtime_performance": {
+    "litert_flatbuffer": {
+      "model_file": "android_export/ppg_arrhythmia_classifier.tflite",
+      "size_kb": 203.91,
+      "mean_latency_ms": 1.164,
+      "p95_latency_ms": 1.267,
+      "p99_latency_ms": 1.279,
+      "throughput_waveforms_per_sec": 859.4
+    },
+    "pytorch_multimodal_api": {
+      "mean_latency_ms": 10.76,
+      "p95_latency_ms": 11.57,
+      "throughput_waveforms_per_sec": 93.0
+    }
+  }
+}

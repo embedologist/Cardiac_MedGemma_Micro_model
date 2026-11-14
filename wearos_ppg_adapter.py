@@ -135,13 +135,20 @@ class WearOSPacketProtocol:
         raw_items = payload.get("points", payload) if isinstance(payload, dict) else payload
         points = []
         for item in raw_items:
-            t_ns = item.get("timestamp_ns") or item.get("timestamp") or item.get("time") or int(time.time() * 1e9)
-            # Heuristic: nanosecond timestamps are > 1e15 for dates after year 2001.
-            # Millisecond timestamps (13 digits) are between 1e12 and 1e13.
-            # Using 1e16 as the threshold safely covers ms inputs up to year 2286
-            # while correctly leaving genuine ns timestamps (>= 1e15) unchanged.
-            if t_ns < 1e16:
-                t_ns = int(t_ns * 1_000_000)  # ms -> ns
+            t_raw = item.get("timestamp_ns") or item.get("timestamp") or item.get("time") or int(time.time() * 1e9)
+            # Calibrated 3-tier timestamp detection:
+            # - Seconds (< 1e11, e.g. epoch seconds ~1.7e9 or relative elapsed sec): multiply by 1e9
+            # - Milliseconds (1e11 <= t < 1e15, e.g. epoch ms ~1.7e12): multiply by 1e6
+            # - Microseconds (1e15 <= t < 1e17): multiply by 1e3
+            # - Nanoseconds (>= 1e17, or genuine Android uptime nanos >= 1e14): leave unchanged
+            if t_raw < 1e11:
+                t_ns = int(t_raw * 1_000_000_000)
+            elif t_raw < 1e14:
+                t_ns = int(t_raw * 1_000_000)
+            elif t_raw < 1e16:
+                t_ns = int(t_raw * 1_000)
+            else:
+                t_ns = int(t_raw)
 
             green = item.get("ppg_green") or item.get("value") or item.get("ppg") or 0
             status = item.get("status") if "status" in item else item.get("green_status", 0)
@@ -272,28 +279,34 @@ class WearOSPPGAdapter:
         if len(timestamps_ns) < 2:
             raise ValueError("Insufficient data points for resampling")
 
+        # Sort and deduplicate timestamps to protect against BLE packet jitter / reordering
+        order = np.argsort(timestamps_ns)
+        timestamps_ns = np.asarray(timestamps_ns, dtype=np.int64)[order]
+        values = np.asarray(values, dtype=np.float64)[order]
+        unique_mask = np.concatenate(([True], np.diff(timestamps_ns) > 0))
+        timestamps_ns = timestamps_ns[unique_mask]
+        values = values[unique_mask]
+
+        if len(timestamps_ns) < 2:
+            raise ValueError("Insufficient unique data points for resampling")
+
         # Convert nanoseconds to relative seconds starting from 0
         t_sec = (timestamps_ns - timestamps_ns[0]) / 1e9
-        total_time = t_sec[-1]
+        total_time = float(t_sec[-1])
 
         # Anti-aliased interpolation
         # If input sampling rate is significantly higher than 25 Hz (e.g. 100 Hz),
         # apply preliminary lowpass decimation to avoid aliasing
         approx_fs = len(values) / max(total_time, 0.001)
         if approx_fs > 35.0:
-            # Decimate high-rate signal
             decimate_factor = int(round(approx_fs / self.target_fs))
             if decimate_factor > 1:
                 # Apply anti-aliasing FIR filter and resample
                 values = scipy_signal.resample_poly(values, self.target_fs, int(round(approx_fs)))
-                if len(values) >= self.TARGET_SAMPLES:
-                    return values[-self.TARGET_SAMPLES:].astype(np.float32)
-                else:
-                    target_t = np.linspace(0, 1, self.TARGET_SAMPLES)
-                    src_t = np.linspace(0, 1, len(values))
-                    return np.interp(target_t, src_t, values).astype(np.float32)
+                # Update uniform relative time coordinates for the decimated samples
+                t_sec = np.linspace(0, total_time, len(values), endpoint=False)
 
-        # Standard uniform 25 Hz extraction:
+        # Standard uniform 25 Hz extraction without time dilation:
         # If we have >= target_duration_sec (e.g. 90s), extract the most recent window
         if total_time >= target_duration_sec:
             start_t = total_time - target_duration_sec
@@ -302,7 +315,7 @@ class WearOSPPGAdapter:
             return resampled.astype(np.float32)
         else:
             # Buffer not yet full (less than target_duration_sec):
-            # Resample available duration at true 25 Hz and edge-pad to 2250 samples
+            # Resample available duration at true 25 Hz and edge-pad to 2250 samples WITHOUT time dilation
             num_pts = max(2, int(round(total_time * self.target_fs)))
             t_avail = np.linspace(0, total_time, num_pts, endpoint=False)
             v_avail = np.interp(t_avail, t_sec, values)

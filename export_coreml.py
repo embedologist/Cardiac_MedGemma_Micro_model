@@ -14,6 +14,7 @@ Target Devices:
 import os
 import sys
 import argparse
+from typing import Optional
 import torch
 import torch.nn as nn
 from pipeline import PPGConformerEncoder, PPGCrossAttentionProjector
@@ -85,27 +86,38 @@ def export_conformer_to_coreml(output_dir: str = "coreml_export", latent_dim: in
         print(f"     python3 -c \"import coremltools as ct, torch; m = torch.jit.load('{traced_path}'); ct.convert(m).save('{output_dir}/PPGConformerEncoder.mlpackage')\"")
 
 
-def export_projector_to_coreml(output_dir: str = "coreml_export", sensor_dim: int = 256, llm_dim: int = 896):
+def export_projector_to_coreml(output_dir: str = "coreml_export", sensor_dim: int = 256, llm_dim: Optional[int] = None):
     """
     Exports the Temporal Cross-Attention Projector to TorchScript / Core ML.
+    Automatically detects llm_dim from checkpoint tensors (e.g. 2048 for Llama, 896 for Qwen).
     """
     os.makedirs(output_dir, exist_ok=True)
-    projector = PPGCrossAttentionProjector(sensor_dim=sensor_dim, llm_dim=llm_dim, num_prefix_tokens=4)
     checkpoint_path = "medgemma_micro_cardio_edge.safetensors"
+    proj_sd = {}
     if os.path.exists(checkpoint_path):
         try:
             import safetensors.torch
             with safetensors.safe_open(checkpoint_path, framework="pt") as f:
+                if llm_dim is None and "ppg_projector.queries" in f.keys():
+                    llm_dim = int(f.get_tensor("ppg_projector.queries").shape[-1])
                 proj_sd = {
                     k.replace("ppg_projector.", ""): f.get_tensor(k).to(torch.float32)
                     for k in f.keys()
                     if k.startswith("ppg_projector.")
                 }
-            if proj_sd:
-                projector.load_state_dict(proj_sd, strict=False)
-                print(f"  -> Loaded {len(proj_sd)} trained projector weights from '{checkpoint_path}'")
         except Exception as e:
-            print(f"  -> Note: using default weights ({e})")
+            print(f"  -> Note: could not inspect checkpoint ({e})")
+
+    if llm_dim is None:
+        llm_dim = 896
+
+    projector = PPGCrossAttentionProjector(sensor_dim=sensor_dim, llm_dim=llm_dim, num_prefix_tokens=4)
+    if proj_sd:
+        try:
+            projector.load_state_dict(proj_sd, strict=True)
+            print(f"  -> Successfully loaded {len(proj_sd)} trained projector weights (llm_dim={llm_dim}) from '{checkpoint_path}'")
+        except Exception as e:
+            print(f"  -> Warning: could not load exact state dict ({e}), using default weights.")
     projector.eval()
 
     example_input = torch.randn(1, sensor_dim)

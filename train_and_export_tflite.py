@@ -46,109 +46,69 @@ EMBED_DIM = 128
 
 def build_arrhythmia_model() -> tf.keras.Model:
     """
-    Constructs a 1D Convolutional-Attention Biosignal Network for 90s continuous PPG streams.
+    Constructs a 1D Convolutional Conformer Biosignal Network for 90s continuous PPG streams.
     Input:  [Batch, 2250, 1]
     Output: [Batch, 5] probabilities
     """
     inputs = tf.keras.Input(shape=(2250, 1), name="ppg_waveform")
 
-    # Multi-scale convolutional stem
-    # 2250 -> 1125
-    x = tf.keras.layers.Conv1D(32, kernel_size=15, strides=2, padding="same", use_bias=False)(inputs)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Activation("gelu")(x)
-    x = tf.keras.layers.MaxPooling1D(pool_size=2, strides=2)(x)  # 1125 -> 562
-
-    # 562 -> 281
-    x = tf.keras.layers.Conv1D(64, kernel_size=7, strides=2, padding="same", use_bias=False)(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Activation("gelu")(x)
-    x = tf.keras.layers.MaxPooling1D(pool_size=2, strides=2)(x)  # 281 -> 140
-
-    # 140 -> 70
-    x = tf.keras.layers.Conv1D(128, kernel_size=5, strides=2, padding="same", use_bias=False)(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Activation("gelu")(x)
-
-    # Local depthwise feature refinement
-    res = x
-    dw = tf.keras.layers.DepthwiseConv1D(kernel_size=7, padding="same", use_bias=False)(x)
-    dw = tf.keras.layers.BatchNormalization()(dw)
-    dw = tf.keras.layers.Activation("gelu")(dw)
-    pw = tf.keras.layers.Conv1D(128, kernel_size=1, use_bias=False)(dw)
-    pw = tf.keras.layers.BatchNormalization()(pw)
-    x = tf.keras.layers.Add()([res, pw])
-
-    # Temporal Self-Attention pooling
-    attn = tf.keras.layers.MultiHeadAttention(num_heads=4, key_dim=32)(x, x)
-    x = tf.keras.layers.Add()([x, attn])
-    x = tf.keras.layers.LayerNormalization()(x)
-
-    # Global temporal pooling
-    pooled = tf.keras.layers.GlobalAveragePooling1D(name="pooled_latent")(x)  # [Batch, 128]
-
-    # Classification head
-    d = tf.keras.layers.Dense(64, activation="gelu")(pooled)
-    d = tf.keras.layers.Dropout(0.15)(d)
-    outputs = tf.keras.layers.Dense(5, activation="softmax", name="arrhythmia_probabilities")(d)
+    x = tf.keras.layers.Conv1D(32, kernel_size=15, strides=2, padding="same", activation="gelu", name="ppg_conv1")(inputs)
+    x = tf.keras.layers.LayerNormalization(name="ppg_norm1")(x)
+    x = tf.keras.layers.DepthwiseConv1D(kernel_size=15, padding="same", activation="gelu", name="ppg_depthwise")(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=1, activation="gelu", name="ppg_pointwise")(x)
+    x = tf.keras.layers.LayerNormalization(name="ppg_norm2")(x)
+    x = tf.keras.layers.MaxPool1D(pool_size=2, name="ppg_pool")(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=7, activation="gelu", name="ppg_conv2")(x)
+    x = tf.keras.layers.GlobalAveragePooling1D(name="ppg_gap")(x)
+    h_arr = tf.keras.layers.Dense(256, activation="relu", name="ppg_dense")(x)
+    outputs = tf.keras.layers.Dense(5, activation="softmax", name="arrhythmia_probabilities")(h_arr)
 
     model = tf.keras.Model(inputs=inputs, outputs=outputs, name="MedGemmaArrhythmiaClassifier")
     return model
 
 
-def train_arrhythmia_model(epochs: int = 16, batch_size: int = 32) -> tf.keras.Model:
+def train_arrhythmia_model(epochs: int = 15, batch_size: int = 16) -> tf.keras.Model:
     print("=" * 65)
     print("Training Robust 1D Biosignal Arrhythmia Classifier on Continuous Spectra...")
     print("=" * 65)
 
     sim = PPGSimulator(sampling_rate=25, duration_sec=90)
-    samples_per_class = 260
-    total_train = samples_per_class * 5  # 1,300 samples
+    samples_per_class = 60
+    total_train = samples_per_class * 5
 
     print(f"Generating {total_train} synthetic 90s PPG training windows across 5 cardiac states...")
-    x_train = np.zeros((total_train, 2250, 1), dtype=np.float32)
-    y_train = np.zeros((total_train,), dtype=np.int32)
+    x_train, y_train = [], []
+    for _ in range(samples_per_class):
+        for c in range(5):
+            w, _ = sim.generate_window(c)
+            x_train.append(w.reshape(2250, 1))
+            y_train.append(c)
 
-    idx = 0
-    for c in range(5):
-        for _ in range(samples_per_class):
-            wave, label = sim.generate_window(c)
-            # Add variable realistic noise (0.01 to 0.05)
-            noise_amp = np.random.uniform(0.01, 0.05)
-            noisy_wave = wave + np.random.normal(0, noise_amp, wave.shape).astype(np.float32)
-            noisy_wave = (noisy_wave - np.mean(noisy_wave)) / (np.std(noisy_wave) + 1e-6)
-            x_train[idx] = noisy_wave.reshape(2250, 1)
-            y_train[idx] = label
-            idx += 1
+    x_train = np.array(x_train, dtype=np.float32)
+    y_train = np.array(y_train, dtype=np.int32)
+    y_one_hot = tf.keras.utils.to_categorical(y_train, num_classes=5)
 
-    # Shuffle
-    perm = np.random.permutation(total_train)
-    x_train = x_train[perm]
-    y_train = y_train[perm]
-
-    # Validation set (150 samples)
-    val_samples = 30 * 5
-    x_val = np.zeros((val_samples, 2250, 1), dtype=np.float32)
-    y_val = np.zeros((val_samples,), dtype=np.int32)
-    v_idx = 0
-    for c in range(5):
-        for _ in range(30):
-            w, l = sim.generate_window(c)
-            x_val[v_idx] = w.reshape(2250, 1)
-            y_val[v_idx] = l
-            v_idx += 1
+    # Validation set (100 samples)
+    x_val, y_val = [], []
+    for _ in range(20):
+        for c in range(5):
+            w, _ = sim.generate_window(c)
+            x_val.append(w.reshape(2250, 1))
+            y_val.append(c)
+    x_val = np.array(x_val, dtype=np.float32)
+    y_val_one_hot = tf.keras.utils.to_categorical(np.array(y_val, dtype=np.int32), num_classes=5)
 
     model = build_arrhythmia_model()
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
-        loss="sparse_categorical_crossentropy",
+        loss="categorical_crossentropy",
         metrics=["accuracy"],
     )
 
     history = model.fit(
         x_train,
-        y_train,
-        validation_data=(x_val, y_val),
+        y_one_hot,
+        validation_data=(x_val, y_val_one_hot),
         epochs=epochs,
         batch_size=batch_size,
         verbose=1,

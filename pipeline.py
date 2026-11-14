@@ -237,7 +237,7 @@ def calibrate_rhythm_prediction(
 ) -> Tuple[int, np.ndarray, str]:
     """
     Physiological sanity calibration combining neural classification with hemodynamic ground truth.
-    Eliminates false-positive PVC/AFib flipping on normal resting heart rates (52-98 BPM).
+    Ensures physiological consistency without falsely suppressing positive arrhythmia findings.
     """
     bpm = float(hemodynamic_metrics.get("mean_bpm", 72.0))
     cv_rr = float(hemodynamic_metrics.get("cv_rr", 0.05))
@@ -245,11 +245,11 @@ def calibrate_rhythm_prediction(
     calibrated_idx = predicted_idx
     reason = "Neural prediction verified"
 
-    # Rule 1: Normal resting heart rate (52-98 BPM) with low variability & no premature beats CANNOT be PVC or AFib
-    if (predicted_idx == 4 or predicted_idx == 1) and (52.0 <= bpm <= 98.0):
-        if premature_ratio < 0.04 and cv_rr < 0.12:
-            calibrated_idx = 0
-            reason = f"Corrected to Normal Sinus: Resting HR {bpm:.1f} BPM is regular (CV_RR={cv_rr:.2f}, Ectopic={premature_ratio:.2f})"
+    # Rule 1: Normal resting heart rate (52-98 BPM) with neural AFib detection:
+    # Do NOT forcefully override AFib to Normal Sinus! Rate-controlled AFib patients routinely
+    # exhibit resting rates in this range; overriding creates catastrophic stroke risk.
+    if predicted_idx == 1 and (52.0 <= bpm <= 98.0) and cv_rr < 0.08 and premature_ratio < 0.02:
+        reason = f"Controlled rate ({bpm:.1f} BPM): Low RR variability, but neural morphology suggests possible rate-controlled AFib."
 
     # Rule 2: Bradycardia check: regular rhythm with HR <= 51.5 BPM
     if predicted_idx == 0 and bpm < 51.5 and cv_rr < 0.12:
@@ -267,25 +267,15 @@ def calibrate_rhythm_prediction(
         calibrated_idx = 0
         reason = f"Calibrated to Normal Sinus: Rate {bpm:.1f} BPM < 98 BPM is within normal resting bounds"
 
-    # Rule 4: AFib requires genuine chaotic RR irregularity (CV_RR >= 0.14)
-    if predicted_idx == 1 and cv_rr < 0.10:
-        if bpm < 52.0:
-            calibrated_idx = 2
-        elif bpm >= 101.0:
-            calibrated_idx = 3
-        else:
-            calibrated_idx = 0
-        reason = f"Corrected from AFib: Rhythm is regular (CV_RR={cv_rr:.2f} < 0.10)"
-
-    # Rule 5: PVC requires detectable premature beats
-    if predicted_idx == 4 and premature_ratio < 0.03:
+    # Rule 4: PVC requires absence of all ectopy before considering normal sinus
+    if predicted_idx == 4 and premature_ratio < 0.01 and cv_rr < 0.05:
         calibrated_idx = 0
-        reason = f"Corrected from PVC: No premature beats detected (ratio={premature_ratio:.2f})"
+        reason = f"Calibrated to Normal Sinus: Zero premature beats detected across 90s (ratio={premature_ratio:.2f}, CV_RR={cv_rr:.2f})"
 
     # Update probability distribution if calibrated
     new_probs = np.array(probabilities, dtype=np.float32).copy()
     if calibrated_idx != predicted_idx:
-        new_probs[calibrated_idx] = max(float(new_probs[calibrated_idx]), 0.85)
+        new_probs[calibrated_idx] = max(float(new_probs[calibrated_idx]), 0.70)
         new_probs /= np.sum(new_probs)
 
     return calibrated_idx, new_probs, reason
@@ -483,13 +473,19 @@ class PPGConformerEncoder(nn.Module):
             nn.Linear(64, num_classes),
         )
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        return_patches: bool = False,
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
         Args:
             x: PPG tensor of shape [B, T, C] (e.g. [B, 2250, 1])
+            return_patches: If True, returns (logits, pooled_latent, temporal_patches)
         Returns:
             logits: [B, num_classes]
             pooled_latent: [B, latent_dim]
+            feat (optional): [B, 70, latent_dim] temporal patch embeddings
         """
         # [B, T, C] -> [B, C, T] for Conv1d
         x = x.transpose(1, 2)
@@ -503,6 +499,8 @@ class PPGConformerEncoder(nn.Module):
         pooled = self.pool_norm(feat.mean(dim=1))  # [B, 256]
 
         logits = self.classifier(pooled)
+        if return_patches:
+            return logits, pooled, feat
         return logits, pooled
 
 
@@ -1025,9 +1023,14 @@ class MedGemmaMicroModel(nn.Module):
 
         prefix_embeds = None
         if ppg_waveforms is not None:
-            ppg_logits, sensor_latent = self.ppg_encoder(ppg_waveforms)
+            if hasattr(self.ppg_encoder, "conformer_layers"):
+                ppg_logits, pooled, patches = self.ppg_encoder(ppg_waveforms, return_patches=True)
+                sensor_feat = patches
+            else:
+                ppg_logits, pooled = self.ppg_encoder(ppg_waveforms)
+                sensor_feat = pooled
             outputs["ppg_logits"] = ppg_logits
-            prefix_embeds = self.ppg_projector(sensor_latent)  # [B, K, D_LLM]
+            prefix_embeds = self.ppg_projector(sensor_feat)  # [B, K, D_LLM]
 
         if input_ids is not None:
             # Retrieve text token embeddings from student LM
@@ -1078,6 +1081,53 @@ class MedGemmaMicroModel(nn.Module):
                 outputs["lm_loss"] = lm_outputs.loss
 
         return outputs
+
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        ppg_waveforms: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Multimodal causal LM generation:
+        If ppg_waveforms is provided, projects continuous sensor tokens to soft prefix embeddings
+        and conditions the language model on both sensor embeddings and text tokens.
+        """
+        if ppg_waveforms is not None:
+            if hasattr(self.ppg_encoder, "conformer_layers"):
+                _, _, patches = self.ppg_encoder(ppg_waveforms, return_patches=True)
+                sensor_feat = patches
+            else:
+                _, pooled = self.ppg_encoder(ppg_waveforms)
+                sensor_feat = pooled
+            prefix_embeds = self.ppg_projector(sensor_feat)  # [B, K, D_LLM]
+
+            text_embeds = self.student_lm.get_input_embeddings()(input_ids)
+            combined_embeds = torch.cat([prefix_embeds, text_embeds], dim=1)
+            batch_size = prefix_embeds.size(0)
+
+            if attention_mask is not None:
+                prefix_mask = torch.ones(
+                    (batch_size, self.num_prefix_tokens),
+                    dtype=attention_mask.dtype,
+                    device=attention_mask.device,
+                )
+                combined_mask = torch.cat([prefix_mask, attention_mask], dim=1)
+            else:
+                combined_mask = None
+
+            return self.student_lm.generate(
+                inputs_embeds=combined_embeds,
+                attention_mask=combined_mask,
+                **kwargs,
+            )
+        else:
+            return self.student_lm.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                **kwargs,
+            )
 
     def classify_wearos_window(
         self,
@@ -1218,7 +1268,7 @@ def run_distillation_and_training(
     )
 
     micro_model.train()
-    logger.info("Training Biosignal PPG Encoder on continuous 90s pulse streams...")
+    logger.info("Training Biosignal PPG Encoder & Cross-Attention Bridge on continuous 90s pulse streams...")
     for epoch in range(epochs):
         cls_loss_total = 0.0
         correct = 0
@@ -1229,12 +1279,21 @@ def run_distillation_and_training(
             ppg_labels = ppg_labels.to(device)
 
             optimizer_sensor.zero_grad()
-            logits, _ = micro_model.ppg_encoder(ppg_waves)
-            loss = cls_criterion(logits, ppg_labels)
-            loss.backward()
+            if hasattr(micro_model.ppg_encoder, "conformer_layers"):
+                logits, _, patches = micro_model.ppg_encoder(ppg_waves, return_patches=True)
+                prefix_embeds = micro_model.ppg_projector(patches)
+            else:
+                logits, pooled = micro_model.ppg_encoder(ppg_waves)
+                prefix_embeds = micro_model.ppg_projector(pooled)
+
+            loss_cls = cls_criterion(logits, ppg_labels)
+            # Alignment regularization loss: keeps prefix tokens bounded in embedding space
+            loss_proj = 1e-3 * torch.mean(torch.norm(prefix_embeds, dim=-1))
+            total_loss = loss_cls + loss_proj
+            total_loss.backward()
             optimizer_sensor.step()
 
-            cls_loss_total += loss.item()
+            cls_loss_total += loss_cls.item()
             preds = logits.argmax(dim=-1)
             correct += (preds == ppg_labels).sum().item()
             total += ppg_labels.size(0)
@@ -1328,7 +1387,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=2, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
     parser.add_argument("--hf_token", type=str, default=None, help="HuggingFace access token")
-    parser.add_argument("--student_id", type=str, default="unsloth/Llama-3.2-1B-Instruct", help="Student model ID")
+    parser.add_argument("--student_id", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="Student model ID")
     parser.add_argument("--budget_mb", type=float, default=None, help="Mobile memory budget limit in MB")
     parser.add_argument("--skip_training", action="store_true", help="Quick export/dry-run test without training")
     args = parser.parse_args()
