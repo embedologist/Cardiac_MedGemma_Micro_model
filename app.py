@@ -84,7 +84,8 @@ def ensure_model_file(filepath: str, repo_id: str = HF_MODEL_REPO_ID) -> str:
     logger.info("Model file '%s' not found locally. Fetching from Hugging Face Hub '%s'...", filepath, repo_id)
     try:
         from huggingface_hub import hf_hub_download
-        downloaded = hf_hub_download(repo_id=repo_id, filename=filepath, local_dir=".")
+        token = os.environ.get("HF_TOKEN")
+        downloaded = hf_hub_download(repo_id=repo_id, filename=filepath, local_dir=".", token=token)
         logger.info("Successfully fetched '%s' from HF Hub.", filepath)
         return downloaded
     except Exception as e:
