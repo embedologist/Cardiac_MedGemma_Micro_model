@@ -122,10 +122,10 @@ state = {
     "tflite_kb_embeddings": None,
     "tflite_loaded": False,
     "hardware_info": {
-        "chip": "Apple Silicon M2 (ARM64)",
-        "os": f"macOS ({platform.machine()})",
+        "chip": "Apple Silicon M2 (ARM64)" if platform.system() == "Darwin" and "arm" in platform.machine().lower() else f"Cloud Container CPU ({platform.machine()})",
+        "os": f"{platform.system()} ({platform.machine()})",
         "acceleration": "XNNPACK CPU Delegate / LiteRT",
-        "threads": 4,
+        "threads": min(4, os.cpu_count() or 4),
     },
 }
 
