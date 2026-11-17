@@ -74,6 +74,22 @@ ANDROID_DIR = "android_export" if os.path.exists("android_export") else "litert_
 TFLITE_350M_PATH = os.path.join(ANDROID_DIR, "medgemma_micro_cardio_350m.tflite")
 TFLITE_VOCAB_PATH = os.path.join(ANDROID_DIR, "cardio_vocab_350m.json")
 TFLITE_KB_PATH = os.path.join(ANDROID_DIR, "cardiac_knowledge_base_350m.json")
+HF_MODEL_REPO_ID = "litert-community/Cardiac_micro_model_Android_Wear"
+
+
+def ensure_model_file(filepath: str, repo_id: str = HF_MODEL_REPO_ID) -> str:
+    """Ensures a model file exists locally; if not, fetches it dynamically from Hugging Face Hub."""
+    if os.path.exists(filepath):
+        return filepath
+    logger.info("Model file '%s' not found locally. Fetching from Hugging Face Hub '%s'...", filepath, repo_id)
+    try:
+        from huggingface_hub import hf_hub_download
+        downloaded = hf_hub_download(repo_id=repo_id, filename=filepath, local_dir=".")
+        logger.info("Successfully fetched '%s' from HF Hub.", filepath)
+        return downloaded
+    except Exception as e:
+        logger.error("Failed to download '%s' from %s: %s", filepath, repo_id, e)
+        return filepath
 
 EXACT_DISCLAIMER = (
     "⚠️ **Medical Disclaimer:** For educational purposes only, not a prescription or treatment plan. "
@@ -153,19 +169,22 @@ def load_tflite_350m_model() -> bool:
 
     tflite_path = state["tflite_path"]
     if not os.path.exists(tflite_path):
-        # Check alternative directories
+        # Check alternative directories or download from Hugging Face Hub
         for alt in ["android_export/medgemma_micro_cardio_350m.tflite", "litert_export/medgemma_micro_cardio_350m.tflite"]:
             if os.path.exists(alt):
                 tflite_path = alt
                 state["tflite_path"] = alt
                 break
 
+    tflite_path = ensure_model_file(tflite_path)
+    state["tflite_path"] = tflite_path
+
     if not os.path.exists(tflite_path):
         logger.error("Unified 350M TFLite model file not found at %s", tflite_path)
         return False
 
-    vocab_path = TFLITE_VOCAB_PATH if os.path.exists(TFLITE_VOCAB_PATH) else "litert_export/cardio_vocab_350m.json"
-    kb_path = TFLITE_KB_PATH if os.path.exists(TFLITE_KB_PATH) else "litert_export/cardiac_knowledge_base_350m.json"
+    vocab_path = ensure_model_file(TFLITE_VOCAB_PATH if os.path.exists(TFLITE_VOCAB_PATH) else "android_export/cardio_vocab_350m.json")
+    kb_path = ensure_model_file(TFLITE_KB_PATH if os.path.exists(TFLITE_KB_PATH) else "android_export/cardiac_knowledge_base_350m.json")
 
     try:
         size_bytes = os.path.getsize(tflite_path)
@@ -244,6 +263,8 @@ def load_medgemma_micro_model(target_engine: str = "pytorch_edge") -> bool:
         target_student_id = LLAMA_1B_STUDENT_ID
         budget_limit = 2048.0
         model_label = "MedGemma-Micro v2.0 (Llama-3.2-1B Multimodal Edge)"
+
+    target_path = ensure_model_file(target_path)
 
     if not os.path.exists(target_path):
         logger.error("Checkpoint not found at '%s'", target_path)
