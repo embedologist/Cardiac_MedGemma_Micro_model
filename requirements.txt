@@ -7,5 +7,5 @@ torch>=2.2.0
 transformers>=4.40.0
 safetensors>=0.4.0
 huggingface_hub>=0.22.0
-tensorflow>=2.15.0
+ai-edge-litert>=2.0.0
 psutil>=5.9.0

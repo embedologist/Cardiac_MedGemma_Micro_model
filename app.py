@@ -31,11 +31,20 @@ from pydantic import BaseModel, Field
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 try:
-    import tensorflow as tf
+    from ai_edge_litert.interpreter import Interpreter
     HAS_TFLITE = True
 except ImportError:
-    tf = None
-    HAS_TFLITE = False
+    try:
+        from tflite_runtime.interpreter import Interpreter
+        HAS_TFLITE = True
+    except ImportError:
+        try:
+            import tensorflow as tf
+            Interpreter = tf.lite.Interpreter
+            HAS_TFLITE = True
+        except Exception:
+            Interpreter = None
+            HAS_TFLITE = False
 
 from pipeline import (
     PPGSimulator,
@@ -192,8 +201,10 @@ def load_tflite_350m_model() -> bool:
         state["tflite_size_mb"] = round(size_bytes / (1024.0 * 1024.0), 2)
         logger.info("Initializing medgemma_micro_cardio_350m.tflite (Size: %.2f MB) with XNNPACK on Apple Silicon M2...", state["tflite_size_mb"])
 
-        # Optimize for Apple Silicon M2 CPU with 4 performance threads
-        interpreter = tf.lite.Interpreter(model_path=tflite_path, num_threads=4)
+        # Optimize for Apple Silicon M2 CPU or Cloud Container with 4 threads
+        if Interpreter is None:
+            raise RuntimeError("No LiteRT or TensorFlow Lite Interpreter available in environment.")
+        interpreter = Interpreter(model_path=tflite_path, num_threads=4)
         interpreter.allocate_tensors()
         runner = interpreter.get_signature_runner("serving_default")
 
@@ -379,18 +390,25 @@ def startup_event():
     state["current_ppg"] = sig
     state["current_condition"] = 0
 
-    # 2. Load TFLite Unified 350M Model in background
+    # 2. Load TFLite Unified 350M Model (fast load: ~301 MB LiteRT FlatBuffer)
     tflite_ok = load_tflite_350m_model()
+    if tflite_ok:
+        state["active_engine"] = "tflite_350m"
+        logger.info("Startup: Initial active engine set to tflite_350m (medgemma_micro_cardio_350m.tflite)")
 
-    # 3. Load PyTorch model (Primary newly trained Llama-3.2-1B multimodal edge model)
-    try:
-        load_medgemma_micro_model(target_engine="pytorch_edge")
-        state["active_engine"] = "pytorch_edge"
-        logger.info("Active engine set to: pytorch_edge (medgemma_micro_cardio_edge.safetensors)")
-    except Exception as e:
-        logger.warning("PyTorch model startup skipped or failed: %s", str(e))
-        if tflite_ok:
-            state["active_engine"] = "tflite_350m"
+    # 3. Load PyTorch model in background thread so server opens port 7860 immediately for health checks
+    def _bg_load_pytorch():
+        try:
+            logger.info("Background thread: loading PyTorch multimodal model weights...")
+            load_medgemma_micro_model(target_engine="pytorch_edge")
+            state["active_engine"] = "pytorch_edge"
+            logger.info("Background thread: PyTorch model loaded successfully. Active engine -> pytorch_edge")
+        except Exception as e:
+            logger.warning("PyTorch model background load skipped or failed: %s", str(e))
+            if tflite_ok:
+                state["active_engine"] = "tflite_350m"
+
+    threading.Thread(target=_bg_load_pytorch, daemon=True).start()
 
 
 # =====================================================================
