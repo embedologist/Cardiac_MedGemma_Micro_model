@@ -24,7 +24,7 @@ const STATE = {
   sweepSpeed: 3, // points per frame
   isClassifying: false,
   isGenerating: false,
-  useMultimodal: true,
+  useMultimodal: false,
   chatHistory: []
 };
 
@@ -939,6 +939,18 @@ function renderQATable(cases) {
 
 async function init() {
   resizeCanvas();
+  if (toggleMultimodal) {
+    toggleMultimodal.checked = STATE.useMultimodal;
+  }
+  if (bridgeIndicator) {
+    bridgeIndicator.classList.toggle('active', STATE.useMultimodal);
+    const span = bridgeIndicator.querySelector('span:last-child');
+    if (span) {
+      span.textContent = STATE.useMultimodal
+        ? '1D-Conformer + Cross-Attention Active'
+        : 'Multimodal Bridge Off (Pure Text Mode)';
+    }
+  }
   await fetchStatus();
   await loadPresets();
   // Initial normal sinus waveform

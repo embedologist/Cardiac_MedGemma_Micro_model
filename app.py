@@ -1564,6 +1564,19 @@ def chat(req: ChatRequest):
         ]
     )
 
+    is_general_physiology = any(
+        phrase in clean_inquiry
+        for phrase in [
+            "how my heart works", "how the heart works", "how does the heart work",
+            "what does the heart do", "anatomy of the heart", "heart function",
+            "blood flow", "cardiac cycle", "what is the heart", "circulatory system"
+        ]
+    )
+    is_pharmacotherapy_query = any(
+        kw in clean_inquiry
+        for kw in ["medication", "drug", "statin", "beta blocker", "dose", "treatment", "prescribe", "pill", "side effect", "guideline", "contraindication", "therapy", "first-line"]
+    )
+
     if is_emergency_red_flag:
         if is_emergency_chest_pain:
             emergency_directive = (
@@ -1613,12 +1626,23 @@ def chat(req: ChatRequest):
                 f"Do NOT ask the patient to provide their readings."
             )
         user_query = f"{telemetry_header}\n{clinical_directive}\n{rag_context}\n[User Inquiry]: {req.message}"
+    elif is_general_physiology:
+        user_query = (
+            f"Explain clearly, step-by-step, and in educational English how the human heart works:\n"
+            f"- The four chambers (atria and ventricles)\n"
+            f"- Blood circulation (oxygen-poor to lungs, oxygen-rich to the body)\n"
+            f"- The electrical pacemaker system (SA node) that creates heartbeats\n"
+            f"[User Inquiry]: {req.message}"
+        )
     elif rag_context:
         ambient_ctx = f"[Patient Context: Resting HR {bpm} BPM, Monitored Rhythm: {cond_name}]\n" if req.use_ppg_context else ""
+        if is_pharmacotherapy_query:
+            guidance_instruction = "provide a thorough, clear, and direct clinical answer in English to the inquiry. Explicitly name the specific medications, clinical classes, and guideline targets:"
+        else:
+            guidance_instruction = "provide a clear, direct, and evidence-based answer in English to the inquiry:"
         user_query = (
             f"{ambient_ctx}{rag_context}\n"
-            f"Based on the verified clinical evidence above, provide a thorough, clear, and direct clinical answer in English to the inquiry. "
-            f"Explicitly name the specific medications, clinical classes, and guideline targets:\n"
+            f"Based on the verified clinical evidence above, {guidance_instruction}\n"
             f"{req.message}"
         )
     else:
@@ -1656,8 +1680,8 @@ def chat(req: ChatRequest):
 
     input_tokens = tokenizer(formatted_input, return_tensors="pt").to(device)
 
-    # Dynamic minimum token bound
-    min_tokens = min(40, max(15, req.max_tokens - 40)) if req.max_tokens >= 80 else 10
+    # Dynamic minimum token bound (keep modest to prevent forced degenerate fill-in)
+    min_tokens = 5
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
 
     start_time = time.perf_counter()
@@ -1674,7 +1698,8 @@ def chat(req: ChatRequest):
                 temperature=min(0.65, max(0.25, req.temperature)),
                 top_p=0.9,
                 pad_token_id=pad_id,
-                repetition_penalty=1.12,
+                repetition_penalty=1.22,
+                no_repeat_ngram_size=3,
             )
             # When generate() runs with inputs_embeds, out contains only the newly generated tokens
             generated_tokens = out[0]
@@ -1687,7 +1712,8 @@ def chat(req: ChatRequest):
                 temperature=min(0.65, max(0.25, req.temperature)),
                 top_p=0.9,
                 pad_token_id=pad_id,
-                repetition_penalty=1.12,
+                repetition_penalty=1.22,
+                no_repeat_ngram_size=3,
             )
             generated_tokens = out[0][input_tokens.input_ids.shape[1] :]
         reply_text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
@@ -1703,6 +1729,36 @@ def chat(req: ChatRequest):
         reply_text = re.sub(r"[\u4e00-\u9fff]+", "", reply_text)
         reply_text = re.sub(r"[（）]", "", reply_text)
         reply_text = re.sub(r"\s{2,}", " ", reply_text).strip()
+
+    # Guard against autoregressive repetitive token loops (e.g. 'or, or, or' or duplicated n-grams)
+    words = reply_text.split()
+    if len(words) > 8:
+        max_consecutive_repeats = 1
+        cur_repeats = 1
+        for w_i in range(1, len(words)):
+            clean_curr = re.sub(r"[^\w]", "", words[w_i].lower())
+            clean_prev = re.sub(r"[^\w]", "", words[w_i - 1].lower())
+            if clean_curr and clean_curr == clean_prev:
+                cur_repeats += 1
+                max_consecutive_repeats = max(max_consecutive_repeats, cur_repeats)
+            else:
+                cur_repeats = 1
+        if max_consecutive_repeats >= 4 or (len(words) > 20 and len(set(w.lower() for w in words)) / len(words) < 0.35):
+            logger.warning("Detected repetition degeneration in LM output (max_repeats=%d). Restoring clean clinical rationale...", max_consecutive_repeats)
+            if is_general_physiology:
+                reply_text = (
+                    "The human heart is a muscular organ that functions as a continuous double pump. "
+                    "It has four chambers: the right atrium and right ventricle pump deoxygenated blood to the lungs to pick up oxygen, "
+                    "while the left atrium and left ventricle pump oxygen-rich blood out to the rest of the body. "
+                    "Each contraction is triggered and coordinated by electrical impulses starting at the sinoatrial (SA) node."
+                )
+            elif rag_docs and rag_docs[0].get("answer"):
+                reply_text = rag_docs[0]["answer"].strip()
+            else:
+                reply_text = (
+                    "Maintaining optimal cardiovascular health requires regular aerobic physical activity, "
+                    "a nutrient-dense diet (such as DASH with low sodium), restorative sleep, and periodic blood pressure screening."
+                )
 
     # Strip any accidental tool calls
     reply_text = re.sub(r"<tool_call>.*?</tool_call>", "", reply_text, flags=re.DOTALL)
